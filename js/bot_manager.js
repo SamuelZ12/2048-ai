@@ -1,28 +1,59 @@
 function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
-    this.depth = 4; // Maximum depth for expectimax search
-    this.addBotButton();
+    this.isRandomEnabled = false;
+    this.depth = 4;
+    this.addControls();
 }
 
-BotManager.prototype.addBotButton = function() {
+BotManager.prototype.addControls = function() {
     var self = this;
-    var container = document.querySelector('.above-game');
     
-    var botButton = document.createElement('a');
-    botButton.className = 'bot-button';
-    botButton.textContent = 'Enable Bot';
-    botButton.style.marginLeft = '10px';
+    var botButton = document.querySelector('.bot-button');
+    var randomButton = document.querySelector('.random-button');
     
     botButton.addEventListener('click', function() {
+        if (self.isRandomEnabled) {
+            self.isRandomEnabled = false;
+            randomButton.classList.remove('active');
+        }
         self.isEnabled = !self.isEnabled;
+        botButton.classList.toggle('active');
         botButton.textContent = self.isEnabled ? 'Disable Bot' : 'Enable Bot';
         if (self.isEnabled) {
             self.makeNextMove();
         }
     });
     
-    container.appendChild(botButton);
+    randomButton.addEventListener('click', function() {
+        if (self.isEnabled) {
+            self.isEnabled = false;
+            botButton.classList.remove('active');
+            botButton.textContent = 'Enable Bot';
+        }
+        self.isRandomEnabled = !self.isRandomEnabled;
+        randomButton.classList.toggle('active');
+        randomButton.textContent = self.isRandomEnabled ? 'Disable Random' : 'Enable Random';
+        if (self.isRandomEnabled) {
+            self.makeRandomMove();
+        }
+    });
+};
+
+BotManager.prototype.makeRandomMove = function() {
+    if (!this.isRandomEnabled) return;
+    
+    var moves = [0, 1, 2, 3]; // up, right, down, left
+    var randomMove = moves[Math.floor(Math.random() * moves.length)];
+    
+    this.gameManager.move(randomMove);
+    
+    var self = this;
+    setTimeout(function() {
+        if (!self.gameManager.isGameTerminated()) {
+            self.makeRandomMove();
+        }
+    }, 100);
 };
 
 BotManager.prototype.makeNextMove = function() {
