@@ -97,82 +97,56 @@ BotManager.prototype.makeNextMove = function() {
 };
 
 BotManager.prototype.findBestMove = function() {
-    var bestScore = -Infinity;
-    var bestMove = null;
-    
-    // Try all possible moves
-    for (var move = 0; move < 4; move++) {
-        var gridCopy = this.copyGrid(this.gameManager.grid);
-        var score = this.expectimax(gridCopy, this.depth, false);
-        
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove = move;
+    // Try to move down first
+    if (this.canMove(2)) { // 2 is down
+        return 2;
+    }
+    // If can't move down, try left
+    if (this.canMove(3)) { // 3 is left
+        return 3;
+    }
+    // If can't move left, try down again
+    if (this.canMove(2)) {
+        return 2;
+    }
+    // If no preferred moves are available, try any available move
+    for (var direction = 0; direction < 4; direction++) {
+        if (this.canMove(direction)) {
+            return direction;
         }
     }
-    
-    return bestMove;
+    return null;
 };
 
-BotManager.prototype.expectimax = function(grid, depth, isMax) {
-    if (depth === 0) {
-        return this.evaluateGrid(grid);
-    }
-    
-    if (isMax) {
-        var maxScore = -Infinity;
-        for (var move = 0; move < 4; move++) {
-            var gridCopy = this.copyGrid(grid);
-            // Try move and get resulting score
-            var score = this.expectimax(gridCopy, depth - 1, false);
-            maxScore = Math.max(maxScore, score);
-        }
-        return maxScore;
-    } else {
-        var avgScore = 0;
-        var emptyCells = this.getEmptyCells(grid);
-        var probability = 1 / emptyCells.length;
-        
-        emptyCells.forEach(function(cell) {
-            // Try adding a 2 (90% probability)
-            var gridCopy = this.copyGrid(grid);
-            gridCopy.cells[cell.x][cell.y] = new Tile({ x: cell.x, y: cell.y }, 2);
-            avgScore += 0.9 * probability * this.expectimax(gridCopy, depth - 1, true);
-            
-            // Try adding a 4 (10% probability)
-            gridCopy = this.copyGrid(grid);
-            gridCopy.cells[cell.x][cell.y] = new Tile({ x: cell.x, y: cell.y }, 4);
-            avgScore += 0.1 * probability * this.expectimax(gridCopy, depth - 1, true);
-        }, this);
-        
-        return avgScore;
-    }
-};
+BotManager.prototype.canMove = function(direction) {
+    var gridCopy = this.copyGrid(this.gameManager.grid);
+    var vector = this.gameManager.getVector(direction);
+    var traversals = this.gameManager.buildTraversals(vector);
+    var moved = false;
 
-BotManager.prototype.evaluateGrid = function(grid) {
-    var score = 0;
-    var emptyCells = 0;
-    var monotonicity = 0;
-    var smoothness = 0;
-    
-    // Count empty cells and calculate monotonicity
-    for (var x = 0; x < 4; x++) {
-        for (var y = 0; y < 4; y++) {
-            if (!grid.cells[x][y]) {
-                emptyCells++;
-            } else {
-                var value = grid.cells[x][y].value;
-                score += value;
-                
-                // Prefer larger values in corners
-                if ((x === 0 || x === 3) && (y === 0 || y === 3)) {
-                    score += value * 2;
+    traversals.x.forEach(function(x) {
+        traversals.y.forEach(function(y) {
+            var cell = { x: x, y: y };
+            var tile = gridCopy.cellContent(cell);
+
+            if (tile) {
+                var positions = this.gameManager.findFarthestPosition.call(
+                    {grid: gridCopy}, 
+                    cell, 
+                    vector
+                );
+                var next = gridCopy.cellContent(positions.next);
+
+                if (next && next.value === tile.value) {
+                    moved = true;
+                } else if (!this.gameManager.positionsEqual(cell, positions.farthest)) {
+                    moved = true;
                 }
             }
-        }
-    }
-    
-    return score + (emptyCells * 100);
+        }, this);
+    }, this);
+
+    return moved;
 };
 
 BotManager.prototype.copyGrid = function(grid) {
@@ -188,18 +162,6 @@ BotManager.prototype.copyGrid = function(grid) {
         }
     }
     return gridCopy;
-};
-
-BotManager.prototype.getEmptyCells = function(grid) {
-    var emptyCells = [];
-    for (var x = 0; x < grid.size; x++) {
-        for (var y = 0; y < grid.size; y++) {
-            if (!grid.cells[x][y]) {
-                emptyCells.push({x: x, y: y});
-            }
-        }
-    }
-    return emptyCells;
 };
 
 BotManager.prototype.updateHighScoreDisplay = function() {
