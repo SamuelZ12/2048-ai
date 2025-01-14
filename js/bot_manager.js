@@ -28,7 +28,6 @@ BotManager.prototype.addControls = function() {
         }
         self.isEnabled = !self.isEnabled;
         botButton.classList.toggle('active');
-        botButton.textContent = self.isEnabled ? 'Disable Bot' : 'Enable Bot';
         if (self.isEnabled) {
             self.makeNextMove();
         }
@@ -38,11 +37,9 @@ BotManager.prototype.addControls = function() {
         if (self.isEnabled) {
             self.isEnabled = false;
             botButton.classList.remove('active');
-            botButton.textContent = 'Enable Bot';
         }
         self.isRandomEnabled = !self.isRandomEnabled;
         randomButton.classList.toggle('active');
-        randomButton.textContent = self.isRandomEnabled ? 'Disable Random' : 'Enable Random';
         if (self.isRandomEnabled) {
             self.makeRandomMove();
         }
