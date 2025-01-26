@@ -885,9 +885,8 @@ hr {
     margin-top: 30px !important; } }
 
 .speed-controls {
-  margin: 25px 0;
+  margin: 20px 0;
   padding-top: 20px;
-  border-top: 2px solid rgba(255, 255, 255, 0.1);
 }
 
 .speed-controls h4 {
