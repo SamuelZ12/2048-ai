@@ -31,8 +31,8 @@ A web-based version of the classic 2048 game featuring both manual play and an A
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/YOUR_REPONAME.git](https://github.com/YOUR_USERNAME/YOUR_REPONAME.git)
-    cd YOUR_REPONAME
+    git clone https://github.com/SamuelZ12/2048-ai.git
+    cd 2048-ai
     ```
 2.  **Open the game:** Simply open the `index.html` file in your web browser.
 
