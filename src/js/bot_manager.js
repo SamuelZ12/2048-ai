@@ -291,47 +291,4 @@ BotManager.prototype.listen = function() {
     window.addEventListener('beforeunload', function() {
         self.terminateWorker();
     });
-};
-
-// Reset bot controls (called by GameManager on restart)
-BotManager.prototype.resetControls = function() {
-    console.log("Resetting Bot Controls.");
-    // Disable AI bot
-    if (this.isEnabled) {
-        this.isEnabled = false;
-        var botButton = document.querySelector('.bot-button');
-        if (botButton) botButton.classList.remove('active');
-        this.terminateWorker(); // Terminate worker if it was running
-    }
-    // Disable Random bot
-    if (this.isRandomEnabled) {
-        this.isRandomEnabled = false;
-        var randomButton = document.querySelector('.random-button');
-        if (randomButton) randomButton.classList.remove('active');
-        // No worker to terminate for random bot
-    }
-    this.isCalculating = false; // Ensure calculation flag is reset
-};
-
-// Enable the AI bot programmatically (called by GameManager on keepPlaying)
-BotManager.prototype.enableBot = function() {
-    if (!this.isEnabled) {
-        console.log("Programmatically enabling AI Bot.");
-        // Ensure random bot is disabled
-        if (this.isRandomEnabled) {
-            this.isRandomEnabled = false;
-            var randomButton = document.querySelector('.random-button');
-            if (randomButton) randomButton.classList.remove('active');
-        }
-
-        // Enable AI bot state and UI
-        this.isEnabled = true;
-        var botButton = document.querySelector('.bot-button');
-        if (botButton) botButton.classList.add('active');
-
-        // Start the bot's move cycle
-        this.makeNextMove();
-    } else {
-        console.log("enableBot called, but bot was already enabled.");
-    }
 }; 

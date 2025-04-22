@@ -358,191 +358,149 @@ function checkGameOver(grid) {
 }
 
 
-// Heuristic function - Optimized to use a single grid traversal
+// Heuristic function
 function calculateHeuristic(grid) {
     // Game Over Check: Strongly penalize terminal states.
     if (checkGameOver(grid)) {
         return -Infinity;
     }
 
-    // --- Thresholds --- 
-    const HIGH_VALUE_THRESHOLD = 128;
-    const LARGE_TILE_THRESHOLD = 64;
-
-    // --- Initialize Heuristic Components ---
+    var sumOfTiles = 0;
     var numEmpty = 0;
     var smoothness = 0;
-    var monotonicityPenalty = 0;
-    var cornerBonus = 0;
+    var monotonicity = 0;
+    var cornerBonus = 0; // Added corner bonus component
     var maxValue = 0;
     var maxTilePosition = null;
-    var snakePatternScore = 0;
-    var isolationPenalty = 0;      // New: Penalty for isolated high tiles
-    var blockedMergePenalty = 0;   // New: Penalty for blocked merges
-    var largeTileProximityBonus = 0; // New: Bonus for adjacent large tiles
+    var snakePatternScore = 0; // New component for snake pattern
 
-    // --- Weights (can be tuned) ---
-    var weightEmpty = 1.5;
-    var weightSmoothness = 0.1;
-    var weightMonotonicity = 1.0;
-    var weightCornerBonus = 2.0;
-    var weightSnakePattern = 3.0; // Explicitly float
-    var weightIsolation = 0.7;       // New weight
-    var weightBlockedMerge = 1.0;    // New weight
-    var weightLargeTileProximity = 0.3;// New weight
+    // Weights for different components (can be tuned)
+    var weightEmpty = 1.5; // Prioritize empty cells
+    var weightSmoothness = 0.1; // Penalize differences between adjacent tiles
+    var weightMonotonicity = 1.0; // Encourage tiles values to increase/decrease along rows/cols
+    var weightCornerBonus = 2.0; // Encourage the max value tile to be in a corner
+    var weightSnakePattern = 3.0; // Encourage tiles to follow a snake pattern
 
     // Snake Pattern Weights (Top-Left Corner Snake)
+    // Higher values are more desirable positions. Using powers of 2 for stronger preference.
     const snakeWeights = [
         [Math.pow(2, 15), Math.pow(2, 14), Math.pow(2, 13), Math.pow(2, 12)],
         [Math.pow(2, 8),  Math.pow(2, 9),  Math.pow(2, 10), Math.pow(2, 11)],
         [Math.pow(2, 7),  Math.pow(2, 6),  Math.pow(2, 5),  Math.pow(2, 4) ],
         [Math.pow(2, 0),  Math.pow(2, 1),  Math.pow(2, 2),  Math.pow(2, 3) ]
     ];
+    // Alternative (Linear weights like example):
+    // const snakeWeights = [
+    //     [15, 14, 13, 12],
+    //     [ 8,  9, 10, 11],
+    //     [ 7,  6,  5,  4],
+    //     [ 0,  1,  2,  3]
+    // ];
 
-    // --- Single Pass Grid Traversal ---
+
     grid.eachCell(function (x, y, tile) {
         if (tile) {
-            const logValue = Math.log2(tile.value);
-            const value = tile.value;
+            sumOfTiles += tile.value; // Simple sum of values (less important than others)
 
-            // --- Max Value Tracking ---
-            if (value > maxValue) {
-                maxValue = value;
+            // Track max value and position
+            if (tile.value > maxValue) {
+                maxValue = tile.value;
                 maxTilePosition = { x: x, y: y };
             }
 
-            // --- Snake Pattern Score ---
-            snakePatternScore += value * snakeWeights[x][y];
-
-            // --- Isolation Penalty Check ---
-            if (value >= HIGH_VALUE_THRESHOLD) {
-                let badNeighbors = 0;
-                for (let dir = 0; dir < 4; dir++) {
-                    const vector = getVector(dir);
-                    const neighborPos = { x: x + vector.x, y: y + vector.y };
-                    const neighbor = grid.cellContent(neighborPos);
-                    // Penalize if neighbor is empty or significantly smaller
-                    if (!neighbor || neighbor.value * 4 < value) {
-                        badNeighbors++;
-                    }
-                }
-                // Penalty scales with tile value and number of bad neighbors
-                if (badNeighbors > 0) {
-                   isolationPenalty += logValue * badNeighbors;
-                }
-            }
-
-            // --- Smoothness, Monotonicity, Blocked Merges, Large Tile Proximity (vs. Neighbors) ---
-            
-            // Check BOTTOM neighbor (x+1, y)
+            // Smoothness Calculation: Penalize large differences between adjacent tiles (log scale)
+            var logValue = Math.log2(tile.value);
+            // Compare with right neighbor
             if (x + 1 < grid.size) {
-                var bottomNeighbor = grid.cellContent({ x: x + 1, y: y });
-                if (bottomNeighbor) {
-                    const bottomLogValue = Math.log2(bottomNeighbor.value);
-                    const bottomValue = bottomNeighbor.value;
-                    const diff = Math.abs(logValue - bottomLogValue);
-                    
-                    // Smoothness
-                    if (diff > 1) { smoothness -= diff; }
-                    
-                    // Monotonicity (T->B)
-                    if (logValue > bottomLogValue) { monotonicityPenalty += (logValue - bottomLogValue); }
-                    
-                    // Large Tile Proximity Bonus
-                    if (value >= LARGE_TILE_THRESHOLD && bottomValue >= LARGE_TILE_THRESHOLD) {
-                        largeTileProximityBonus += Math.min(logValue, bottomLogValue); // Bonus based on smaller of the two logs
-                    }
-
-                    // Blocked Merge Check (Vertical)
-                    // Check if T != B, but B == B2 (tile below B)
-                    if (value !== bottomValue) {
-                       var bottomNeighbor2 = grid.cellContent({ x: x + 2, y: y });
-                       if (bottomNeighbor2 && bottomValue === bottomNeighbor2.value) {
-                           blockedMergePenalty += bottomLogValue; // Penalty scales with the value of blocked tiles
-                       }
-                    } 
-                } else { 
-                    // Optional: Penalize high value tile next to empty (handled partly by isolation)
+                var rightNeighbor = grid.cellContent({ x: x + 1, y: y });
+                if (rightNeighbor) {
+                    smoothness -= Math.abs(logValue - Math.log2(rightNeighbor.value));
                 }
-                 // else { smoothness -= logValue } // Optional: Penalize edge tiles slightly?
             }
-
-            // Check RIGHT neighbor (x, y+1) - Used for Smoothness, Proximity, Blocked Merges, and Horizontal Monotonicity
+            // Compare with bottom neighbor
             if (y + 1 < grid.size) {
-                 var rightNeighbor = grid.cellContent({ x: x, y: y + 1 });
-                 if (rightNeighbor) {
-                     const rightLogValue = Math.log2(rightNeighbor.value);
-                     const rightValue = rightNeighbor.value;
-                     const diff = Math.abs(logValue - rightLogValue);
-
-                     // Smoothness
-                     if (diff > 1) { smoothness -= diff; }
-
-                     // Large Tile Proximity Bonus
-                    if (value >= LARGE_TILE_THRESHOLD && rightValue >= LARGE_TILE_THRESHOLD) {
-                        largeTileProximityBonus += Math.min(logValue, rightLogValue);
-                    }
-
-                     // Blocked Merge Check (Horizontal)
-                    // Check if T != R, but R == R2 (tile right of R)
-                    if (value !== rightValue) {
-                       var rightNeighbor2 = grid.cellContent({ x: x, y: y + 2 });
-                       if (rightNeighbor2 && rightValue === rightNeighbor2.value) {
-                           blockedMergePenalty += rightLogValue;
-                       }
-                    }
-
-                     // Horizontal Monotonicity (Snake Path Dependent)
-                     if (x % 2 === 0) { // Even row (L->R)
-                         if (logValue > rightLogValue) { monotonicityPenalty += (logValue - rightLogValue); }
-                     } 
-                     // Odd rows handled by checking left neighbor below
-                 } else {
-                      // Optional: Penalize high value tile next to empty
-                 }
+                var bottomNeighbor = grid.cellContent({ x: x, y: y + 1 });
+                if (bottomNeighbor) {
+                    smoothness -= Math.abs(logValue - Math.log2(bottomNeighbor.value));
+                }
             }
-            
-             // Check LEFT neighbor (x, y-1) - Only for Horizontal Monotonicity on Odd Rows
-            if (x % 2 !== 0) { // Odd row (R->L)
-                 if (y > 0) {
-                     var leftNeighbor = grid.cellContent({ x: x, y: y - 1 });
-                     if (leftNeighbor) {
-                         var leftLogValue = Math.log2(leftNeighbor.value);
-                          // Monotonicity Check R->L (Current vs Left)
-                          if (logValue > leftLogValue) { 
-                              monotonicityPenalty += (logValue - leftLogValue); 
-                          }
-                           // Smoothness/Proximity/Blocked vs Left could be added here if needed,
-                           // but they were already checked when the left tile was the 'current' tile looking right.
-                     }
-                 }
-            }
+
+            // Snake Pattern Score Calculation
+            // Multiply tile value (or log value) by its position's weight
+            snakePatternScore += tile.value * snakeWeights[x][y]; // Using raw value
+            // snakePatternScore += logValue * snakeWeights[x][y]; // Alternative: Using log value
 
         } else {
             numEmpty++;
         }
     });
 
-    // --- Corner Bonus ---
-    const targetCornerX = grid.size - 1;
-    const targetCornerY = grid.size - 1;
-    if (maxTilePosition) {
-        if (maxTilePosition.x === targetCornerX && maxTilePosition.y === targetCornerY) {
-            cornerBonus = Math.log2(maxValue);
-        } else {
-            cornerBonus = -Math.log2(maxValue);
+    // Monotonicity Calculation: Penalize direction changes in rows and columns
+    // Calculate penalties for values decreasing in each of the four directions
+    var penalties = { up: 0, down: 0, left: 0, right: 0 };
+
+    // Horizontal (Left/Right)
+    for (var x = 0; x < grid.size; x++) {
+        for (var y = 0; y < grid.size - 1; y++) {
+            var currentTile = grid.cellContent({x: x, y: y});
+            var nextTile = grid.cellContent({x: x, y: y + 1});
+            if (currentTile && nextTile) { // Only compare if both cells have tiles
+                var currentValue = Math.log2(currentTile.value);
+                var nextValue = Math.log2(nextTile.value);
+                if (currentValue > nextValue) {
+                    penalties.right += nextValue - currentValue; // Penalize decrease rightward
+                } else if (nextValue > currentValue) {
+                    penalties.left += currentValue - nextValue; // Penalize decrease leftward
+                }
+            }
         }
     }
 
-    // --- Combine Heuristics with Weights ---
+    // Vertical (Up/Down)
+    for (var y = 0; y < grid.size; y++) {
+        for (var x = 0; x < grid.size - 1; x++) {
+             var currentTile = grid.cellContent({x: x, y: y});
+             var nextTile = grid.cellContent({x: x + 1, y: y});
+             if (currentTile && nextTile) { // Only compare if both cells have tiles
+                var currentValue = Math.log2(currentTile.value);
+                var nextValue = Math.log2(nextTile.value);
+                if (currentValue > nextValue) {
+                    penalties.down += nextValue - currentValue; // Penalize decrease downward
+                } else if (nextValue > currentValue) {
+                    penalties.up += currentValue - nextValue; // Penalize decrease upward
+                }
+            }
+        }
+    }
+
+    // Choose the best monotonicity score (least penalty) from the two directions for rows and columns
+    monotonicity = Math.max(penalties.left, penalties.right) + Math.max(penalties.up, penalties.down);
+
+
+    // Corner Bonus: Add a bonus if the max value tile is in a corner
+    if (maxTilePosition) {
+        var isCorner = (maxTilePosition.x === 0 || maxTilePosition.x === grid.size - 1) &&
+                       (maxTilePosition.y === 0 || maxTilePosition.y === grid.size - 1);
+        if (isCorner) {
+            // Give higher bonus if max tile is MUCH larger than others
+            cornerBonus = Math.log2(maxValue); // Bonus scales with log of max value
+        }
+         // Optional: Penalize max tile not being on edge?
+         // else if (maxTilePosition.x > 0 && maxTilePosition.x < grid.size - 1 &&
+         //          maxTilePosition.y > 0 && maxTilePosition.y < grid.size - 1) {
+         //     cornerBonus -= Math.log2(maxValue); // Penalize if not on edge
+         // }
+
+    }
+
+
+    // Combine heuristics with weights
+    // Adding log(maxValue) might be beneficial too, or just relying on corner bonus + monotonicity
     return (numEmpty * weightEmpty) +
-           (smoothness * weightSmoothness) -
-           (monotonicityPenalty * weightMonotonicity) +
+           (smoothness * weightSmoothness) +
+           (monotonicity * weightMonotonicity) +
            (cornerBonus * weightCornerBonus) +
-           (snakePatternScore * weightSnakePattern) -
-           (isolationPenalty * weightIsolation) -       // Apply penalty
-           (blockedMergePenalty * weightBlockedMerge) + // Apply penalty
-           (largeTileProximityBonus * weightLargeTileProximity); // Apply bonus
+           (snakePatternScore * weightSnakePattern); // Add weighted snake pattern score
 }
 
 

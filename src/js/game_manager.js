@@ -4,7 +4,6 @@ function GameManager(size, inputManagerInstance, actuatorInstance, storageManage
   this.storageManager = storageManagerInstance; // Use the passed instance
   this.actuator       = actuatorInstance;       // Use the passed instance
   this.botManager     = null; // Initialize botManager as null
-  this.botWasAutoRunningBeforeWin = false; // Track bot state before winning
 
   this.startTiles     = 2;
 
@@ -29,10 +28,6 @@ GameManager.prototype.setBotManager = function (botManager) {
 GameManager.prototype.restart = function () {
   this.storageManager.clearGameState();
   this.actuator.continueGame(); // Clear the game won/lost message
-  if (this.botManager) {
-    this.botManager.resetControls();
-  }
-  this.botWasAutoRunningBeforeWin = false;
   this.setup();
 };
 
@@ -40,16 +35,11 @@ GameManager.prototype.restart = function () {
 GameManager.prototype.keepPlaying = function () {
   this.keepPlaying = true;
   this.actuator.continueGame(); // Clear the game won/lost message
-  if (this.botManager && this.botWasAutoRunningBeforeWin) {
-    console.log("Keep Playing: Re-enabling AI bot.");
-    this.botManager.enableBot();
-    this.botWasAutoRunningBeforeWin = false;
-  }
 };
 
 // Return true if the game is lost, or has won and the user hasn't kept playing
 GameManager.prototype.isGameTerminated = function () {
-  return this.over; // Only terminate if the game is lost (no moves available)
+  return this.over || (this.won && !this.keepPlaying);
 };
 
 // Set up the game
@@ -220,17 +210,6 @@ GameManager.prototype.move = function (direction) {
 
           // Update the score
           self.score += merged.value;
-
-          // Check for win condition
-          if (merged.value === 2048 && !self.won) {
-            self.won = true;
-            if (self.botManager && self.botManager.isEnabled && !self.keepPlaying) {
-              console.log("Win condition met while AI bot running. Setting flag and stopping bot.");
-              self.botWasAutoRunningBeforeWin = true;
-              // Explicitly terminate worker to ensure clean state before 'Keep Playing'
-              self.botManager.terminateWorker(); 
-            }
-          }
         } else {
           self.moveTile(tile, positions.farthest);
         }
