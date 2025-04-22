@@ -1,139 +1,12 @@
 // src/js/bot_worker.js
 
+importScripts('tile.js', 'grid.js'); // Make main game logic available
+
 // --- Tile Class (from src/js/tile.js) ---
-function Tile(position, value) {
-  this.x = position.x;
-  this.y = position.y;
-  this.value = value || 2;
-
-  this.previousPosition = null;
-  this.mergedFrom = null; // Tracks tiles that merged together
-}
-
-Tile.prototype.savePosition = function () {
-  this.previousPosition = { x: this.x, y: this.y };
-};
-
-Tile.prototype.updatePosition = function (position) {
-  this.x = position.x;
-  this.y = position.y;
-};
-
-Tile.prototype.serialize = function () {
-  return {
-    position: {
-      x: this.x,
-      y: this.y
-    },
-    value: this.value
-  };
-};
+// REMOVED INTERNAL TILE DEFINITION
 
 // --- Grid Class (from src/js/grid.js and dependencies) ---
-function Grid(size, previousState) {
-  this.size = size;
-  // If previousState is provided, load from it, otherwise create an empty grid
-  this.cells = previousState ? this.fromState(previousState) : this.empty();
-}
-
-// Build a grid of the specified size
-Grid.prototype.empty = function () {
-  var cells = [];
-
-  for (var x = 0; x < this.size; x++) {
-    var row = cells[x] = [];
-
-    for (var y = 0; y < this.size; y++) {
-      row.push(null);
-    }
-  }
-
-  return cells;
-};
-
-Grid.prototype.fromState = function (state) {
-  var cells = [];
-
-  for (var x = 0; x < this.size; x++) {
-    var row = cells[x] = [];
-
-    for (var y = 0; y < this.size; y++) {
-      var tile = state[x][y];
-      // When reconstructing from serialized state, use the provided value directly
-      row.push(tile ? new Tile(tile.position, tile.value) : null);
-    }
-  }
-
-  return cells;
-};
-
-// Find the first available random position (Might not be needed directly by bot, but good for completeness)
-Grid.prototype.randomAvailableCell = function () {
-  var cells = this.availableCells();
-
-  if (cells.length) {
-    return cells[Math.floor(Math.random() * cells.length)];
-  }
-};
-
-Grid.prototype.availableCells = function () {
-  var cells = [];
-
-  this.eachCell(function (x, y, tile) {
-    if (!tile) {
-      cells.push({ x: x, y: y });
-    }
-  });
-
-  return cells;
-};
-
-// Call callback for every cell
-Grid.prototype.eachCell = function (callback) {
-  for (var x = 0; x < this.size; x++) {
-    for (var y = 0; y < this.size; y++) {
-      callback(x, y, this.cells[x][y]);
-    }
-  }
-};
-
-// Check if there are any cells available
-Grid.prototype.cellsAvailable = function () {
-  return !!this.availableCells().length;
-};
-
-// Check if the specified cell is taken
-Grid.prototype.cellAvailable = function (cell) {
-  return !this.cellOccupied(cell);
-};
-
-Grid.prototype.cellOccupied = function (cell) {
-  return !!this.cellContent(cell);
-};
-
-Grid.prototype.cellContent = function (cell) {
-  if (this.withinBounds(cell)) {
-    return this.cells[cell.x][cell.y];
-  } else {
-    return null;
-  }
-};
-
-// Inserts a tile at its position
-Grid.prototype.insertTile = function (tile) {
-  this.cells[tile.x][tile.y] = tile;
-};
-
-Grid.prototype.removeTile = function (tile) {
-  this.cells[tile.x][tile.y] = null;
-};
-
-Grid.prototype.withinBounds = function (position) {
-  return position.x >= 0 && position.x < this.size &&
-         position.y >= 0 && position.y < this.size;
-};
-
-// --- Grid Helper Functions (Needed for simulateMove which uses Grid.prototype.move logic) ---
+// REMOVED INTERNAL GRID DEFINITION
 
 // --- Bitboard Implementation ---
 
@@ -376,7 +249,7 @@ function checkTranspose() {
          console.error("Transpose function seems flawed.");
      }
 }
-checkTranspose(); // Run the check when the worker loads
+// checkTranspose(); // Keep commented out or remove if no longer needed
 // --- END TEMPORARY DIAGNOSTIC CHECK ---
 
 /**
@@ -668,17 +541,18 @@ function expectimaxSearch(board, depth) {
     let bestScore = -Infinity;
     let bestMove = -1; // 0: up, 1: right, 2: down, 3: left
 
-    // Try each of the 4 possible moves using bitboard functions
+    // Try each of the 4 possible moves using the Grid simulation helper
     for (let direction = 0; direction < 4; direction++) {
-        const moveFn = moveFunctions[direction]; // Get the bitboard move function
-        const simulationResult = moveFn(board); // Call the function with the BigInt board
+        // Use simulateGridMove to determine if the move is valid according to Grid logic
+        // and get the resulting board state if it is.
+        const simulationResult = simulateGridMove(board, direction);
 
         // Log the simulation result for this direction
-        // console.log(`[DEBUG] expectimaxSearch(depth=${depth}) - Dir ${direction}: moved=${simulationResult.moved}, score=${simulationResult.score}`);
+        // console.log(`[DEBUG] expectimaxSearch(depth=${depth}) - Dir ${direction}: simulated moved=${simulationResult.moved}`);
 
         if (simulationResult.moved) {
-            // If the move changes the board, evaluate the resulting chance node
-            // Pass the resulting BigInt board (simulationResult.board)
+            // If the move changes the board according to Grid logic,
+            // evaluate the resulting chance node using the *new* bitboard state.
             // Depth remains the same for the chance node evaluation originating from this max node level
             const score = evaluateChanceNode(simulationResult.board, depth);
 
@@ -690,8 +564,8 @@ function expectimaxSearch(board, depth) {
                 bestMove = direction;
             }
         } else {
-             // If a move doesn't change the board, it's not a valid move from this state.
-             // We could assign a very low score, but expectimax handles this by not updating bestScore.
+             // If simulateGridMove reports moved: false, this direction doesn't lead to a valid state change.
+             // Do nothing, loop continues.
         }
     }
 
@@ -712,6 +586,37 @@ function expectimaxSearch(board, depth) {
     return { move: bestMove, score: bestScore };
 }
 
+/**
+ * Given a bitboard and a direction index (0=Up,1=Right,2=Down,3=Left),
+ * return { moved, board } using the real Grid.move() logic.
+ * This acts as a bridge between the bitboard representation used in the search
+ * and the canonical move logic from the main game.
+ */
+function simulateGridMove(bitboard, direction) {
+  try {
+    const grid = decodeBoard(bitboard, GRID_SIZE); // Decode current state
+    if (!grid) {
+        console.error("simulateGridMove: Failed to decode board:", bitboard.toString(16));
+        return { moved: false, board: bitboard }; // Cannot simulate if decode fails
+    }
+
+    const result = grid.move(direction); // Perform move using Grid logic
+
+    // If the Grid logic says nothing moved, return the original bitboard
+    if (!result.moved) {
+      return { moved: false, board: bitboard };
+    }
+
+    // If the Grid moved, re-encode the *mutated* Grid back into bitboard format
+    const newBitboard = encodeGrid(grid); // Use encodeGrid which reads the grid state
+    return { moved: true, board: newBitboard };
+
+  } catch (e) {
+      console.error(`simulateGridMove: Error during simulation for direction ${direction} on board ${bitboard.toString(16)}:`, e);
+      // Fallback to reporting no move if an error occurs during simulation
+      return { moved: false, board: bitboard };
+  }
+}
 
 // --- New findBestMove using Iterative Deepening ---
 function findBestMove(initialBoard, initialMaxDepth, timeLimit) {
@@ -800,25 +705,51 @@ function findBestMove(initialBoard, initialMaxDepth, timeLimit) {
 
     // Failsafe: If no move was ever found (bestMoveFound is -1)
     if (bestMoveFound === -1) {
-        console.warn("IDDFS: No best move identified after search (result was -1 or depth 1 incomplete/timed out).");
+        console.warn("IDDFS: No best move identified by search (result was -1 or depth 1 incomplete/timed out).");
         // Double-check if game is *actually* over now using the bitboard state
         if (isGameOver(initialBoard)) {
-             console.log("IDDFS: Failsafe confirmed game over.");
-             // Return null or -1 to indicate no move possible - BotManager handles this
-             return { move: -1 }; // Changed from null to -1 based on manager expectation
-        } else {
-             // If game isn't over, but search returned no move (e.g., error at depth 1, immediate timeout),
-             // try to find *any* valid move as a last resort.
-             console.warn("IDDFS: Failsafe: No move found, but game is not over! Trying to find any valid move.");
-             for (let dir = 0; dir < 4; dir++) {
-                 if (moveFunctions[dir](initialBoard).moved) {
-                     console.warn(`IDDFS: Failsafe found valid move: ${dir}`);
-                     return { move: dir };
-                 }
-             }
-             // If even failsafe finds no move, game must be over.
-             console.error("IDDFS: Failsafe could not find any valid move. Returning -1.");
+             console.log("IDDFS: Failsafe confirmed game over via isGameOver(bitboard).");
+             // Return -1 to indicate no move possible
              return { move: -1 };
+        } else {
+             // If game isn't over according to bitboard checks, but search returned no move,
+             // try to find *any* valid move using the *actual Grid logic* as a last resort.
+             console.warn("IDDFS: Failsafe: No move found by search, but isGameOver(bitboard) is false. Checking with Grid logic.");
+
+             try {
+                const grid = decodeBoard(initialBoard, GRID_SIZE); // Decode to Grid object
+                if (!grid) {
+                    console.error("IDDFS: Failsafe (Grid check) failed to decode board.");
+                    return { move: -1 }; // Cannot proceed if decode fails
+                }
+
+                for (let dir = 0; dir < 4; dir++) {
+                    // Create a copy of the grid to simulate the move, as grid.move modifies the grid
+                    // Assumes the imported Grid has `serialize` and the constructor accepts serialized state
+                    const gridState = grid.serialize(); // Get serializable state {size: ..., cells: ...}
+                    // Check if gridState and gridState.cells are valid before creating new Grid
+                    if (!gridState || !gridState.cells) {
+                        console.error("IDDFS: Failsafe (Grid check) failed to serialize grid for testing move:", dir);
+                        continue; // Try next direction
+                    }
+                     const testGrid = new Grid(gridState.size, gridState.cells);
+
+                    // Use the actual Grid's move logic. Assumes grid.move(dir) returns {moved: boolean, ...}
+                    if (testGrid.move(dir).moved) {
+                        console.warn(`IDDFS: Failsafe (Grid check) found valid move: ${dir}`);
+                        return { move: dir };
+                    }
+                }
+
+                // If loop completes without finding a grid-valid move
+                console.error("IDDFS: Failsafe (Grid check) could not find any valid move. Returning -1.");
+                return { move: -1 };
+
+             } catch (e) {
+                console.error("IDDFS: Failsafe (Grid check) encountered an error:", e);
+                // Fallback to returning -1 if the Grid check itself fails
+                return { move: -1 };
+             }
         }
     }
 
@@ -874,11 +805,56 @@ generateMoveLUTs();
 console.log("Bot Worker: Loaded and ready with Bitboard logic.");
 
 /**
- * Checks if the game is over based on the bitboard state.
- * Returns true when there are no empty cells AND no move can change the board.
- * @param {BigInt} board The current board state as a BigInt.
- * @returns {boolean} True if the game is over, false otherwise.
+ * Checks if the game is over based on the real Grid logic,
+ * not on the bitboard moves.
  */
+function isGameOver(board) {
+  // 1) Decode the bitboard back into a Grid
+  const grid = decodeBoard(board);  // you already have decodeBoard above
+  if (!grid) {
+      console.error("isGameOver: Failed to decode board. Assuming not over.");
+      return false; // Safety: if decode fails, assume not over
+  }
+
+  // 2) If there's any empty cell, game is not over
+  if (grid.availableCells().length > 0) return false;
+
+  // 3) Check every tile for a possible merge with a neighbor
+  let mergePossible = false; // Flag to break out of nested loops
+  for (let x = 0; x < GRID_SIZE; x++) {
+    for (let y = 0; y < GRID_SIZE; y++) {
+      const tile = grid.cellContent({x,y});
+      if (!tile) continue;
+
+      // Check neighbors [right, down] is sufficient since we iterate left-to-right, top-to-bottom
+      const neighbors = [[1, 0], [0, 1]]; // Check right and down
+
+      for (const [dx, dy] of neighbors) {
+          const nx = x + dx;
+          const ny = y + dy;
+          const other = grid.cellContent({x: nx, y: ny});
+
+          // Important: Check if other exists and has the same value
+          if (other && other.value === tile.value) {
+              mergePossible = true;
+              break; // Found a merge, exit inner loop (neighbors)
+          }
+      }
+      if (mergePossible) break; // Exit outer loop (y)
+    }
+     if (mergePossible) break; // Exit outer loop (x)
+  }
+
+  if (mergePossible) {
+      return false; // Found a potential merge
+  }
+
+  // 4) No empty cells and no merges ⇒ game over
+  return true;
+}
+
+// --- Previous isGameOver implementation (commented out or removed) ---
+/*
 function isGameOver(board) {
     // --- Fast path: is there at least one empty cell? ---
     for (let pos = 0; pos < 16; pos++) {
@@ -898,4 +874,5 @@ function isGameOver(board) {
 
     // No empty cells and no move leads to a different board -> game over.
     return true;
-} 
+}
+*/ 
