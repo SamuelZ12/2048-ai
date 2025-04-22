@@ -2,7 +2,7 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 4; // This will now act as the max depth for IDDFS
+    this.depth = 3; // This will now act as the max depth for IDDFS
     this.timeLimitPerMove = 100; // Default time limit in milliseconds
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
