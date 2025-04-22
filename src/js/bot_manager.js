@@ -2,17 +2,99 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 3;
+    this.depth = 2;
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
     this.updateHighScoreDisplay();
     this.addControls();
     this.addSpeedControls();
+
+    // Worker related properties
+    this.worker = null;
+    this.isCalculating = false; // Flag to prevent sending new tasks while worker is busy
 }
 
 BotManager.prototype.fpsToMs = function(fps) {
     return Math.round(1000 / fps);
+};
+
+BotManager.prototype.initializeWorker = function() {
+    var self = this;
+    if (this.worker) {
+        // Terminate existing worker if any (e.g., if re-initializing)
+        this.worker.terminate();
+    }
+    console.log("Initializing Bot Worker...");
+    this.worker = new Worker('src/js/bot_worker.js');
+
+    this.worker.onmessage = function(event) {
+        // console.log("BotManager received message from worker:", event.data); // Debug log
+        self.isCalculating = false; // Worker finished calculation
+
+        if (event.data.bestMove !== null && typeof event.data.bestMove !== 'undefined') {
+            var bestMove = event.data.bestMove;
+
+            // Only proceed if the bot is still enabled and the game isn't over
+            if (self.isEnabled && !self.gameManager.isGameTerminated()) {
+                console.log("Bot making move:", bestMove);
+                self.gameManager.move(bestMove);
+
+                // Schedule the next move calculation after the configured delay
+                setTimeout(function() {
+                    // Check again if still enabled and game not over before scheduling next move
+                    if (self.isEnabled && !self.gameManager.isGameTerminated()) {
+                        self.makeNextMove();
+                    }
+                }, self.moveSpeed);
+            } else {
+                console.log("Bot received move but is disabled or game is over. Ignoring.");
+                self.terminateWorker(); // Clean up worker if disabled or game ended
+            }
+        } else if (event.data.status === 'ready') {
+             console.log("Bot Worker reported status: ready");
+             // Worker is ready, potentially trigger first move if needed
+             if (self.isEnabled && !self.isCalculating) {
+                 self.makeNextMove();
+             }
+        } else {
+            console.warn("BotManager received unknown message or no move from worker:", event.data);
+            // Handle cases where worker couldn't find a move (e.g., game over state reached during calculation)
+            // Or if worker sends other message types
+            if (self.isEnabled && !self.gameManager.isGameTerminated()) {
+                // Maybe try again after a delay, or stop the bot?
+                 setTimeout(function() {
+                    if (self.isEnabled && !self.gameManager.isGameTerminated()) {
+                        self.makeNextMove();
+                    }
+                }, self.moveSpeed);
+            } else {
+                 self.terminateWorker();
+            }
+        }
+    };
+
+    this.worker.onerror = function(error) {
+        console.error("Error in Bot Worker:", error.message, "at", error.filename, ":", error.lineno);
+        self.isCalculating = false;
+        self.terminateWorker(); // Stop the bot on worker error
+        // Optionally, update UI to show bot error
+        var botButton = document.querySelector('.bot-button');
+        if (botButton) botButton.classList.remove('active');
+        self.isEnabled = false;
+    };
+
+     // Optional: Send a ping to confirm worker loaded
+     // this.worker.postMessage({ command: 'ping' });
+};
+
+BotManager.prototype.terminateWorker = function() {
+    if (this.worker) {
+        console.log("Terminating Bot Worker...");
+        this.worker.terminate();
+        this.worker = null;
+        this.isCalculating = false;
+    }
 };
 
 BotManager.prototype.addControls = function() {
@@ -25,11 +107,17 @@ BotManager.prototype.addControls = function() {
         if (self.isRandomEnabled) {
             self.isRandomEnabled = false;
             randomButton.classList.remove('active');
+            // No need to terminate worker here, as random bot doesn't use it
         }
         self.isEnabled = !self.isEnabled;
         botButton.classList.toggle('active');
+
         if (self.isEnabled) {
-            self.makeNextMove();
+            console.log("AI Bot Enabled");
+            self.makeNextMove(); // Start the bot's move calculation loop
+        } else {
+            console.log("AI Bot Disabled");
+            self.terminateWorker(); // Terminate worker when disabled
         }
     });
     
@@ -37,11 +125,16 @@ BotManager.prototype.addControls = function() {
         if (self.isEnabled) {
             self.isEnabled = false;
             botButton.classList.remove('active');
+            self.terminateWorker(); // Terminate AI bot worker if it was active
         }
         self.isRandomEnabled = !self.isRandomEnabled;
         randomButton.classList.toggle('active');
         if (self.isRandomEnabled) {
-            self.makeRandomMove();
+            console.log("Random Bot Enabled");
+            self.makeRandomMove(); // Start random moves
+        } else {
+             console.log("Random Bot Disabled");
+             // Stop random moves (setTimeout chain will naturally stop)
         }
     });
 };
@@ -74,283 +167,123 @@ BotManager.prototype.makeRandomMove = function() {
     this.gameManager.move(randomMove);
     
     var self = this;
-    setTimeout(function() {
-        if (!self.gameManager.isGameTerminated()) {
+    // Check game state *before* setting timeout for the next move
+    if (!self.gameManager.isGameTerminated() && self.isRandomEnabled) {
+         setTimeout(function() {
             self.makeRandomMove();
-        }
-    }, this.moveSpeed);
-};
-
-BotManager.prototype.makeNextMove = function() {
-    if (!this.isEnabled) return;
-    
-    var bestMoveResult = this.findBestMove();
-    if (bestMoveResult.move !== null) {
-        this.gameManager.move(bestMoveResult.move);
-        var self = this;
-        setTimeout(function() {
-            if (!self.gameManager.isGameTerminated()) {
-                self.makeNextMove();
-            }
         }, this.moveSpeed);
     }
 };
 
-BotManager.prototype.findBestMove = function() {
-    return this.expectimaxSearch(this.gameManager.grid, this.depth);
-};
-
-BotManager.prototype.expectimaxSearch = function(grid, depth) {
-    // Base case: depth limit reached or game over
-    if (depth === 0 || this.checkGameOver(grid)) {
-        return { move: null, score: this.calculateHeuristic(grid) }; // Use heuristic at leaf nodes
+BotManager.prototype.makeNextMove = function() {
+    // Ensure bot is enabled and game is not over
+    if (!this.isEnabled || this.gameManager.isGameTerminated()) {
+        console.log("makeNextMove called but bot disabled or game over.");
+        this.terminateWorker(); // Ensure worker is terminated if game ended while bot was running
+        return;
     }
 
-    var bestScore = -Infinity;
-    var bestMove = null;
+    // Initialize worker if it doesn't exist
+    if (!this.worker) {
+        this.initializeWorker();
+        // Worker initialization is async, wait for worker to signal ready or first message response
+        // Let the onmessage handler trigger subsequent makeNextMove calls
+        // We can send an initial task immediately after creating worker
+    }
 
-    // Max Node: Iterate through possible moves (0: up, 1: right, 2: down, 3: left)
-    for (var direction = 0; direction < 4; direction++) {
-        if (this.canMoveOnGrid(grid, direction)) {
-            // Step 3: Simulate the move
-            var simulationResult = this.simulateMove(grid, direction);
-            if (simulationResult.moved) {
-                var simulatedGrid = simulationResult.grid;
-                var moveScore = simulationResult.score; // Score gained from merges in this move
-
-                // Step 2 (Chance Node): Evaluate the expected score after random tile placement
-                var expectedScore = this.evaluateChanceNode(simulatedGrid, depth); // Depth stays same for chance node eval, recursion within handles depth-1
-                
-                var currentMoveScore = moveScore + expectedScore; // Total score = immediate reward + expected future reward
-
-                if (currentMoveScore > bestScore) {
-                    bestScore = currentMoveScore;
-                    bestMove = direction;
-                }
-            } else {
-                // If the move simulation didn't change the grid, treat it like an invalid move
-                // This shouldn't happen if canMoveOnGrid is accurate, but good to handle.
-            }
+    // Check if worker exists and is not already calculating
+    if (this.worker && !this.isCalculating) {
+        console.log("Requesting next move from worker. Depth:", this.depth);
+        this.isCalculating = true;
+        try {
+            // Send current grid state and depth to the worker
+            var gridState = this.gameManager.grid.serialize();
+            this.worker.postMessage({ gridState: gridState, depth: this.depth });
+        } catch (error) {
+            console.error("Error posting message to worker:", error);
+            this.isCalculating = false;
+            this.terminateWorker(); // Stop bot if communication fails
+            // Optionally, update UI
+            var botButton = document.querySelector('.bot-button');
+             if (botButton) botButton.classList.remove('active');
+            this.isEnabled = false;
         }
+    } else if (this.isCalculating) {
+        // console.log("Worker is already calculating, waiting...");
+        // Do nothing, the worker's onmessage handler will schedule the next call
+    } else if (!this.worker) {
+         console.log("Worker not yet initialized, waiting...");
+         // Do nothing, initializeWorker should have been called, wait for it
     }
-    
-    // Handle case where no moves are possible (should be caught by checkGameOver earlier, but as safety)
-    if (bestMove === null) {
-        return { move: null, score: this.calculateHeuristic(grid) }; 
-    }
-
-    return { move: bestMove, score: bestScore };
-};
-
-// Evaluates the expected score of a grid state after a random tile is placed
-BotManager.prototype.evaluateChanceNode = function(grid, depth) {
-    var emptyCells = grid.availableCells();
-    var numEmpty = emptyCells.length;
-
-    if (numEmpty === 0 || this.checkGameOver(grid)) {
-        // If no empty cells or game over, return heuristic of the current state
-        // Although technically a tile MUST be placed if move was made, 
-        // checkGameOver covers cases where placing a tile might lead to an immediate loss
-        return this.calculateHeuristic(grid);
-    }
-
-    var totalExpectedScore = 0;
-
-    // Calculate expected score considering 2 and 4 tile placements
-    for (var i = 0; i < numEmpty; i++) {
-        var cell = emptyCells[i];
-        var tile2 = new Tile(cell, 2);
-        var tile4 = new Tile(cell, 4);
-
-        // Expected score if a 2 is placed
-        var gridWith2 = this.copyGrid(grid);
-        gridWith2.insertTile(tile2);
-        var score2 = this.expectimaxSearch(gridWith2, depth - 1).score; // Recurse for next MAX node
-        totalExpectedScore += score2 * 0.9;
-
-        // Expected score if a 4 is placed
-        var gridWith4 = this.copyGrid(grid); // Need a fresh copy
-        gridWith4.insertTile(tile4);
-        var score4 = this.expectimaxSearch(gridWith4, depth - 1).score; // Recurse for next MAX node
-        totalExpectedScore += score4 * 0.1;
-    }
-
-    // Average the score over all possible placements
-    var averageExpectedScore = totalExpectedScore / numEmpty;
-
-    return averageExpectedScore;
-};
-
-// Placeholder for the heuristic function (Step 4)
-BotManager.prototype.calculateHeuristic = function(grid) {
-    // Game Over Check: Strongly penalize terminal states.
-    if (this.checkGameOver(grid)) {
-        return -Infinity;
-    }
-
-    var sumOfTiles = 0;
-    var numEmpty = 0;
-    var smoothness = 0; // Added smoothness component
-    var weightEmpty = 2.7; // Tunable weight for empty cells (log value often used)
-    var weightSmoothness = 0.1; // Tunable weight for smoothness
-
-    grid.eachCell(function (x, y, tile) {
-        if (tile) {
-            sumOfTiles += tile.value;
-
-            // Smoothness Calculation: Penalize large differences between adjacent tiles
-            // Compare with right neighbor
-            if (x + 1 < grid.size) {
-                var rightNeighbor = grid.cellContent({ x: x + 1, y: y });
-                if (rightNeighbor) {
-                    smoothness -= Math.abs(Math.log2(tile.value) - Math.log2(rightNeighbor.value));
-                }
-            }
-            // Compare with bottom neighbor
-            if (y + 1 < grid.size) {
-                var bottomNeighbor = grid.cellContent({ x: x, y: y + 1 });
-                if (bottomNeighbor) {
-                    smoothness -= Math.abs(Math.log2(tile.value) - Math.log2(bottomNeighbor.value));
-                }
-            }
-        } else {
-            numEmpty++;
-        }
-    });
-
-    // Heuristic combining factors: Tile Sum, Empty Cells, and Smoothness
-    // Using Math.log(numEmpty + 1) can provide a diminishing return for empty cells
-    var heuristicValue = sumOfTiles + Math.log(numEmpty + 1) * weightEmpty + smoothness * weightSmoothness;
-
-
-    // TODO: Optionally add other components like monotonicity, corner bonus here.
-
-    return heuristicValue; 
-};
-
-// Checks if the game is over for a given grid state
-BotManager.prototype.checkGameOver = function(grid) {
-    // Game is over if no moves are possible
-    for (var direction = 0; direction < 4; direction++) {
-        if (this.canMoveOnGrid(grid, direction)) {
-            return false; // Move is possible
-        }
-    }
-    return true; // No moves possible
-};
-
-BotManager.prototype.simulateMove = function(grid, direction) {
-    var gridCopy = this.copyGrid(grid);
-    var vector = this.gameManager.getVector(direction);
-    var traversals = this.gameManager.buildTraversals(vector);
-    var moved = false;
-    var moveScore = 0;
-
-    var selfGameManager = this.gameManager;
-
-    gridCopy.eachCell(function (x, y, tile) {
-        if (tile) {
-            tile.mergedFrom = null;
-        }
-    });
-
-    traversals.x.forEach(function (x) {
-        traversals.y.forEach(function (y) {
-            var cell = { x: x, y: y };
-            var tile = gridCopy.cellContent(cell);
-
-            if (tile) {
-                var positions = selfGameManager.findFarthestPosition.call(
-                    { grid: gridCopy },
-                    cell,
-                    vector
-                );
-                var next = gridCopy.cellContent(positions.next);
-
-                if (next && next.value === tile.value && !next.mergedFrom) {
-                    var merged = new Tile(positions.next, tile.value * 2);
-                    merged.mergedFrom = [tile, next];
-
-                    gridCopy.insertTile(merged);
-                    gridCopy.removeTile(tile);
-
-                    moveScore += merged.value;
-                    moved = true;
-                } else {
-                    gridCopy.cells[tile.x][tile.y] = null;
-                    gridCopy.cells[positions.farthest.x][positions.farthest.y] = tile;
-                    tile.updatePosition(positions.farthest);
-                }
-
-                // Check if the tile moved from its original spot
-                // Pass the tile object directly, as positionsEqual expects {x, y} properties
-                if (!selfGameManager.positionsEqual(cell, tile)) { 
-                    moved = true;
-                }
-            }
-        });
-    });
-    
-    return { grid: gridCopy, score: moveScore, moved: moved };
-};
-
-BotManager.prototype.canMoveOnGrid = function(grid, direction) {
-    var gridCopy = this.copyGrid(grid);
-    var vector = this.gameManager.getVector(direction);
-    var traversals = this.gameManager.buildTraversals(vector);
-    var moved = false;
-
-    var selfGameManager = this.gameManager;
-
-    traversals.x.forEach(function(x) {
-        traversals.y.forEach(function(y) {
-            var cell = { x: x, y: y };
-            var tile = gridCopy.cellContent(cell);
-
-            if (tile) {
-                var positions = selfGameManager.findFarthestPosition.call(
-                    { grid: gridCopy },
-                    cell,
-                    vector
-                );
-                var next = gridCopy.cellContent(positions.next);
-
-                if (next && next.value === tile.value && !next.mergedFrom) {
-                    moved = true;
-                } else if (!selfGameManager.positionsEqual(cell, positions.farthest)) {
-                    moved = true;
-                }
-            }
-        });
-    });
-
-    return moved;
-};
-
-BotManager.prototype.canMove = function(direction) {
-    return this.canMoveOnGrid(this.gameManager.grid, direction);
-};
-
-// Corrected copyGrid function in js/bot_manager.js
-BotManager.prototype.copyGrid = function(grid) {
-    var serialized = grid.serialize();
-    // Create a new Grid instance using the serialized state's size and cells
-    return new Grid(serialized.size, serialized.cells);
 };
 
 BotManager.prototype.updateHighScoreDisplay = function() {
-    document.querySelector('.bot-high-score').textContent = this.botHighScore;
-    document.querySelector('.random-high-score').textContent = this.randomHighScore;
+    var botScoreElement = document.querySelector('.bot-high-score');
+    var randomScoreElement = document.querySelector('.random-high-score');
+    if (botScoreElement) botScoreElement.textContent = this.botHighScore;
+    if (randomScoreElement) randomScoreElement.textContent = this.randomHighScore;
 };
 
-BotManager.prototype.checkAndUpdateHighScores = function(score) {
-    if (this.isEnabled && score > this.botHighScore) {
+BotManager.prototype.updateBotHighScore = function(score) {
+    if (score > this.botHighScore) {
         this.botHighScore = score;
-        localStorage.setItem('botHighScore', score);
-        this.updateHighScoreDisplay();
-    } else if (this.isRandomEnabled && score > this.randomHighScore) {
-        this.randomHighScore = score;
-        localStorage.setItem('randomHighScore', score);
+        localStorage.setItem('botHighScore', this.botHighScore);
         this.updateHighScoreDisplay();
     }
+};
+
+BotManager.prototype.updateRandomHighScore = function(score) {
+    if (score > this.randomHighScore) {
+        this.randomHighScore = score;
+        localStorage.setItem('randomHighScore', this.randomHighScore);
+        this.updateHighScoreDisplay();
+    }
+};
+
+// Add listeners for game events (Keep and potentially adapt)
+BotManager.prototype.listen = function() {
+    var self = this;
+    // Modify gameManager listeners if needed, e.g., to update high scores
+    // based on which bot is active.
+
+    // Example: Update high score based on which bot is active
+    this.gameManager.on('gameOver', function(data) {
+        if (self.isEnabled) { // AI Bot was active
+            self.updateBotHighScore(data.score);
+            self.terminateWorker(); // Stop worker on game over
+            var botButton = document.querySelector('.bot-button');
+             if (botButton) botButton.classList.remove('active');
+             self.isEnabled = false; // Ensure bot is marked as disabled
+        } else if (self.isRandomEnabled) { // Random Bot was active
+            self.updateRandomHighScore(data.score);
+             var randomButton = document.querySelector('.random-button');
+             if (randomButton) randomButton.classList.remove('active');
+             self.isRandomEnabled = false; // Ensure bot is marked as disabled
+        }
+    });
+
+     this.gameManager.on('win', function(data) {
+        if (self.isEnabled) { // AI Bot was active
+            self.updateBotHighScore(data.score);
+            // Decide if bot should continue after winning
+            // self.terminateWorker();
+            // var botButton = document.querySelector('.bot-button');
+            // if (botButton) botButton.classList.remove('active');
+            // self.isEnabled = false;
+        } else if (self.isRandomEnabled) { // Random Bot was active
+            self.updateRandomHighScore(data.score);
+             // var randomButton = document.querySelector('.random-button');
+             // if (randomButton) randomButton.classList.remove('active');
+             // self.isRandomEnabled = false;
+        }
+    });
+
+    // We might not need the 'move' listener anymore for the AI bot,
+    // as the worker loop handles the next move trigger.
+    // Random bot still uses setTimeout loop.
+
+    // Consider adding a listener for window unload to terminate worker
+    window.addEventListener('beforeunload', function() {
+        self.terminateWorker();
+    });
 }; 
