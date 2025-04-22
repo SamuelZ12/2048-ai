@@ -580,8 +580,13 @@ function evaluateChanceNode(grid, depth) {
 // Chooses the move that maximizes the expected score from the subsequent chance node.
 function expectimaxSearch(grid, depth) {
     // Base case: Leaf node (max depth or game over)
+    // Note: checkGameOver is potentially expensive, consider calling it less often if profiling shows issues
     if (depth <= 0 || checkGameOver(grid)) {
-        return { move: -1, score: calculateHeuristic(grid) }; // Return heuristic score at leaf
+        const heuristicScore = calculateHeuristic(grid);
+        // Store terminal node heuristic value (conceptually at depth 0)
+        const gridKey = getGridKey(grid);
+        transpositionTable.set(gridKey, { type: 'max', depth: depth, score: heuristicScore, move: -1 });
+        return { move: -1, score: heuristicScore };
     }
 
      // Transposition Table Check for Player Node
@@ -590,87 +595,169 @@ function expectimaxSearch(grid, depth) {
          const entry = transpositionTable.get(gridKey);
          // Use stored value only if it was computed at least as deep as required now
          // AND if it stores a move (indicating it came from a player node evaluation)
-         if (entry.depth >= depth && typeof entry.move !== 'undefined') {
-             // console.log(`TT Hit (Max): Key=${gridKey.substring(0,10)}..., Depth=${depth}, Stored Move=${entry.move}, Score=${entry.score}`);
-             return entry;
+         if (entry.type === 'max' && entry.depth >= depth && typeof entry.move !== 'undefined') {
+             // console.log(`TT Hit (Max): Depth=${depth}, Stored Move=${entry.move}, Score=${entry.score}`);
+             return { move: entry.move, score: entry.score }; // Return the stored move and score
          }
      }
-
 
     let bestScore = -Infinity;
     let bestMove = -1; // 0: up, 1: right, 2: down, 3: left
 
-    // Max Node: Iterate through possible moves (0: up, 1: right, 2: down, 3: left)
-    for (var direction = 0; direction < 4; direction++) {
-        var simulationResult = simulateMove(grid, direction);
+    // Try each of the 4 possible moves (0: up, 1: right, 2: down, 3: left)
+    for (let direction = 0; direction < 4; direction++) {
+        const simulationResult = simulateMove(grid, direction);
 
         if (simulationResult.moved) {
-            var simulatedGrid = simulationResult.grid;
-            var moveScore = simulationResult.score; // Score gained from merges in this move
-
-            // Evaluate the expected score after random tile placement (Chance Node)
+            // If the move changes the board, evaluate the resulting chance node
             // Depth remains the same when evaluating the chance node stemming from this move
-            var expectedScore = evaluateChanceNode(simulatedGrid, depth);
+            const score = evaluateChanceNode(simulationResult.grid, depth);
 
-            var currentMoveScore = moveScore + expectedScore; // Total score = immediate reward + expected future reward
-
-            // Handle -Infinity case from evaluateChanceNode (if placing a tile leads to immediate game over)
-            if (currentMoveScore === -Infinity && bestScore === -Infinity) {
-                 // If this is the first valid move and it leads to game over, take it
-                 if (bestMove === -1) {
-                     bestScore = currentMoveScore;
-                     bestMove = direction;
-                 }
-                 // Otherwise, prefer moves that don't lead to immediate game over
-            } else if (currentMoveScore > bestScore) {
-                bestScore = currentMoveScore;
+            // Update best move if this one is better
+            if (score > bestScore) {
+                bestScore = score;
                 bestMove = direction;
             }
+        } else {
+             // If a move doesn't change the board, it's generally not considered
         }
     }
 
-    // If no moves resulted in a changed grid state (game should be over)
-    if (bestMove === -1) {
-        return { move: -1, score: calculateHeuristic(grid) };
-    }
+     // If no moves resulted in a change (e.g., board full and gridlocked)
+     if (bestMove === -1) {
+         const heuristicScore = calculateHeuristic(grid);
+         // Store result for this dead-end max node
+         transpositionTable.set(gridKey, { type: 'max', depth: depth, score: heuristicScore, move: -1 });
+         return { move: -1, score: heuristicScore };
+     }
 
-    // Store in transposition table
-    transpositionTable.set(gridKey, { move: bestMove, score: bestScore, depth: depth });
+    // Store the best score and move found for this max node state
+    transpositionTable.set(gridKey, { type: 'max', depth: depth, score: bestScore, move: bestMove });
 
     return { move: bestMove, score: bestScore };
 }
 
 
-// --- Main Function Called by BotManager ---
-function findBestMove(gridState, depth) {
-    console.log("Worker received task. Depth:", depth); // Log depth received
-    transpositionTable = new Map(); // Clear/Initialize TT for each new top-level call
+// --- New findBestMove using Iterative Deepening ---
+function findBestMove(gridState, initialMaxDepth, timeLimit) {
+    console.log("Worker received task. Max Depth:", initialMaxDepth, "Time Limit:", timeLimit);
+    transpositionTable = new Map(); // Clear TT for each new top-level call
     const startTime = performance.now();
+    var grid = new Grid(gridState.size, gridState.cells); // Reconstruct grid from state
 
-    // Reconstruct the Grid object from the serialized state
-    var grid = new Grid(gridState.size, gridState.cells);
-    return expectimaxSearch(grid, depth);
+    let bestMoveFound = -1;
+    let currentDepth = 1;
+    let lastCompletedDepthResult = null;
+
+    // Initial check for immediate game over
+    if (checkGameOver(grid)) {
+        console.warn("IDDFS: Game is already over at the start.");
+        return { move: -1 }; // Indicate no move possible
+    }
+
+    while (true) {
+        const currentTime = performance.now();
+        // Check time limit *before* starting the search for the current depth
+        if (currentTime - startTime > timeLimit || currentDepth > initialMaxDepth) {
+            if (currentDepth > 1) {
+                 console.log(`IDDFS: Time limit (${timeLimit}ms) reached or max depth (${initialMaxDepth}) exceeded before starting depth ${currentDepth}. Using move from depth ${currentDepth - 1}`);
+            } else {
+                 console.log(`IDDFS: Time limit (${timeLimit}ms) reached or max depth (${initialMaxDepth}) exceeded before completing depth 1.`);
+            }
+            break; // Exit loop if time is up or max depth reached before starting next iteration
+        }
+
+        console.log(`IDDFS: Starting search for depth ${currentDepth}`);
+
+        try {
+            // Start expectimax search with the current depth limit
+            // The depth passed here is the *maximum* depth allowed for this iteration
+             let result = expectimaxSearch(grid, currentDepth);
+
+             // Check if a valid move was found *and* the search didn't immediately return heuristic (move != -1)
+             if (result && typeof result.move !== 'undefined' && result.move !== -1) {
+                 bestMoveFound = result.move;
+                 lastCompletedDepthResult = result; // Store the full result (score+move)
+                 console.log(`IDDFS: Depth ${currentDepth} completed. Move: ${result.move}, Score: ${result.score.toFixed(2)}`);
+             } else {
+                 // If no valid move found (result.move === -1), it implies a game over state was reached
+                 // or the board is gridlocked at this depth. Rely on the previous depth's result.
+                 console.log(`IDDFS: No valid move found or returned at depth ${currentDepth}. Using previous depth's result.`);
+                 break; // Stop deepening if no valid move can be found
+             }
+        } catch (e) {
+             console.error(`IDDFS: Error during search at depth ${currentDepth}:`, e);
+             // Stop searching on error, rely on previously found move (if any)
+             break;
+        }
+
+        // Check time again *after* completing a depth iteration
+        const postSearchTime = performance.now();
+        if (postSearchTime - startTime > timeLimit) {
+            console.log(`IDDFS: Time limit (${timeLimit}ms) reached after completing depth ${currentDepth}. Using this depth's result.`);
+            break; // Exit loop if time is up after completing the depth
+        }
+
+        // If time permits and max depth not reached, continue to the next depth
+        currentDepth++;
+    }
+
+    const endTime = performance.now();
+    const duration = (endTime - startTime).toFixed(2);
+    // If we broke the loop *before* starting depth `currentDepth`, the last completed depth is `currentDepth - 1`
+    const finalDepthReached = bestMoveFound !== -1 ? currentDepth - 1 : 0; // Report 0 if no move ever found
+
+    console.log(`Bot Worker: Task completed in ${duration} ms. Final Move: ${bestMoveFound}, Reached Depth: ${finalDepthReached}`);
+
+    // Failsafe: If no move was ever found (e.g., error at depth 1, or immediate game over missed)
+    if (bestMoveFound === -1) {
+        console.warn("IDDFS: No best move identified after search. Checking for any valid fallback move.");
+        for (let dir = 0; dir < 4; dir++) {
+             // Check if the move is possible *without* simulating if game is over
+             if (canMoveOnGrid(grid, dir)) {
+                 const sim = simulateMove(grid, dir); // Simulate only if possible
+                 if (sim.moved) { // Double-check if it actually moved
+                    bestMoveFound = dir;
+                    console.log("IDDFS: Failsafe: picked first valid move:", dir);
+                    break;
+                }
+             }
+        }
+         // If still -1, the game is truly over or gridlocked immediately
+         if (bestMoveFound === -1) {
+             console.error("IDDFS: Failsafe failed. No valid moves possible.");
+             // Return null or a specific value BotManager can interpret as "no move"
+             return { move: null }; // Let BotManager handle this
+         }
+    }
+
+    // Return the best move found within the time/depth limits
+    return { move: bestMoveFound };
 }
 
 
 // --- Worker Message Handling ---
 self.onmessage = function(event) {
     var data = event.data;
-    if (data.gridState && typeof data.depth !== 'undefined') {
-        // console.log("Worker received task: Depth", data.depth, "Grid:", data.gridState); // Debug log
-        var startTime = performance.now();
-        var result = findBestMove(data.gridState, data.depth);
-        var endTime = performance.now();
-        console.log("Bot Worker: Task completed in", (endTime - startTime).toFixed(2), "ms. Move:", result.move, "Score:", result.score.toFixed(2));
+    // Check for the new expected parameters: gridState, maxDepth, timeLimit
+    if (data.gridState && typeof data.maxDepth !== 'undefined' && typeof data.timeLimit !== 'undefined') {
+        // console.log(`Worker received task: MaxDepth=${data.maxDepth}, TimeLimit=${data.timeLimit}ms`);
 
-        // Send the result back to the main thread
+        // Call the new findBestMove function with IDDFS logic
+        const result = findBestMove(data.gridState, data.maxDepth, data.timeLimit);
+
+        // Send the determined best move back to the main thread
+        // Result structure is { move: bestMoveFound } or { move: null }
         self.postMessage({ bestMove: result.move });
+
     } else if (data.command === 'ping') {
         // Optional: Handle simple ping for checking worker status
+        console.log("Worker received ping");
         self.postMessage({ status: 'ready' });
-    }
-    else {
-        console.error("Bot Worker: Received invalid message:", data);
+    } else {
+        console.error("Bot Worker: Received invalid message format:", data);
+        // Send back null move on error
+        self.postMessage({ bestMove: null, error: "Invalid message format" });
     }
 };
 

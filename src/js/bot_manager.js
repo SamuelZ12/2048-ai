@@ -2,7 +2,8 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 3;
+    this.depth = 4; // This will now act as the max depth for IDDFS
+    this.timeLimitPerMove = 100; // Default time limit in milliseconds
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
@@ -193,12 +194,16 @@ BotManager.prototype.makeNextMove = function() {
 
     // Check if worker exists and is not already calculating
     if (this.worker && !this.isCalculating) {
-        console.log("Requesting next move from worker. Depth:", this.depth);
+        console.log("Requesting next move from worker. Max Depth:", this.depth, "Time Limit:", this.timeLimitPerMove, "ms");
         this.isCalculating = true;
         try {
-            // Send current grid state and depth to the worker
+            // Send current grid state, max depth, and time limit to the worker
             var gridState = this.gameManager.grid.serialize();
-            this.worker.postMessage({ gridState: gridState, depth: this.depth });
+            this.worker.postMessage({
+                gridState: gridState,
+                maxDepth: this.depth, // Pass current depth setting as maxDepth
+                timeLimit: this.timeLimitPerMove // Pass the time limit
+            });
         } catch (error) {
             console.error("Error posting message to worker:", error);
             this.isCalculating = false;
