@@ -372,12 +372,31 @@ function calculateHeuristic(grid) {
     var cornerBonus = 0; // Added corner bonus component
     var maxValue = 0;
     var maxTilePosition = null;
+    var snakePatternScore = 0; // New component for snake pattern
 
     // Weights for different components (can be tuned)
     var weightEmpty = 1.5; // Prioritize empty cells
     var weightSmoothness = 0.1; // Penalize differences between adjacent tiles
     var weightMonotonicity = 1.0; // Encourage tiles values to increase/decrease along rows/cols
     var weightCornerBonus = 2.0; // Encourage the max value tile to be in a corner
+    var weightSnakePattern = 3.0; // Encourage tiles to follow a snake pattern
+
+    // Snake Pattern Weights (Top-Left Corner Snake)
+    // Higher values are more desirable positions. Using powers of 2 for stronger preference.
+    const snakeWeights = [
+        [Math.pow(2, 15), Math.pow(2, 14), Math.pow(2, 13), Math.pow(2, 12)],
+        [Math.pow(2, 8),  Math.pow(2, 9),  Math.pow(2, 10), Math.pow(2, 11)],
+        [Math.pow(2, 7),  Math.pow(2, 6),  Math.pow(2, 5),  Math.pow(2, 4) ],
+        [Math.pow(2, 0),  Math.pow(2, 1),  Math.pow(2, 2),  Math.pow(2, 3) ]
+    ];
+    // Alternative (Linear weights like example):
+    // const snakeWeights = [
+    //     [15, 14, 13, 12],
+    //     [ 8,  9, 10, 11],
+    //     [ 7,  6,  5,  4],
+    //     [ 0,  1,  2,  3]
+    // ];
+
 
     grid.eachCell(function (x, y, tile) {
         if (tile) {
@@ -405,62 +424,57 @@ function calculateHeuristic(grid) {
                     smoothness -= Math.abs(logValue - Math.log2(bottomNeighbor.value));
                 }
             }
+
+            // Snake Pattern Score Calculation
+            // Multiply tile value (or log value) by its position's weight
+            snakePatternScore += tile.value * snakeWeights[x][y]; // Using raw value
+            // snakePatternScore += logValue * snakeWeights[x][y]; // Alternative: Using log value
+
         } else {
             numEmpty++;
         }
     });
 
     // Monotonicity Calculation: Penalize direction changes in rows and columns
-    var monoTotals = [0, 0, 0, 0]; // up/down (- / +), left/right (- / +)
+    // Calculate penalties for values decreasing in each of the four directions
+    var penalties = { up: 0, down: 0, left: 0, right: 0 };
 
-    // Rows (left/right)
+    // Horizontal (Left/Right)
     for (var x = 0; x < grid.size; x++) {
-        var current = 0;
-        var next = current + 1;
-        while (next < grid.size) {
-            while (next < grid.size && grid.cellContent({x: x, y: next}) === null) { next++; } // Skip empty cells
-            if (next >= grid.size) break; // End of row
-
-            var currentTile = grid.cellContent({x: x, y: current});
-            var currentValue = currentTile ? Math.log2(currentTile.value) : 0;
-            var nextTile = grid.cellContent({x: x, y: next});
-            var nextValue = nextTile ? Math.log2(nextTile.value) : 0;
-
-            if (currentValue > nextValue) {
-                monoTotals[0] += nextValue - currentValue; // Penalize decreasing rightward
-            } else if (nextValue > currentValue) {
-                monoTotals[1] += currentValue - nextValue; // Penalize increasing rightward
+        for (var y = 0; y < grid.size - 1; y++) {
+            var currentTile = grid.cellContent({x: x, y: y});
+            var nextTile = grid.cellContent({x: x, y: y + 1});
+            if (currentTile && nextTile) { // Only compare if both cells have tiles
+                var currentValue = Math.log2(currentTile.value);
+                var nextValue = Math.log2(nextTile.value);
+                if (currentValue > nextValue) {
+                    penalties.right += nextValue - currentValue; // Penalize decrease rightward
+                } else if (nextValue > currentValue) {
+                    penalties.left += currentValue - nextValue; // Penalize decrease leftward
+                }
             }
-            current = next;
-            next++;
         }
     }
 
-    // Columns (up/down)
+    // Vertical (Up/Down)
     for (var y = 0; y < grid.size; y++) {
-         current = 0;
-         next = current + 1;
-        while (next < grid.size) {
-             while (next < grid.size && grid.cellContent({x: next, y: y}) === null) { next++; } // Skip empty cells
-             if (next >= grid.size) break; // End of column
-
-             currentTile = grid.cellContent({x: current, y: y});
-             currentValue = currentTile ? Math.log2(currentTile.value) : 0;
-             nextTile = grid.cellContent({x: next, y: y});
-             nextValue = nextTile ? Math.log2(nextTile.value) : 0;
-
-            if (currentValue > nextValue) {
-                monoTotals[2] += nextValue - currentValue; // Penalize decreasing downward
-            } else if (nextValue > currentValue) {
-                monoTotals[3] += currentValue - nextValue; // Penalize increasing downward
+        for (var x = 0; x < grid.size - 1; x++) {
+             var currentTile = grid.cellContent({x: x, y: y});
+             var nextTile = grid.cellContent({x: x + 1, y: y});
+             if (currentTile && nextTile) { // Only compare if both cells have tiles
+                var currentValue = Math.log2(currentTile.value);
+                var nextValue = Math.log2(nextTile.value);
+                if (currentValue > nextValue) {
+                    penalties.down += nextValue - currentValue; // Penalize decrease downward
+                } else if (nextValue > currentValue) {
+                    penalties.up += currentValue - nextValue; // Penalize decrease upward
+                }
             }
-            current = next;
-            next++;
         }
     }
 
     // Choose the best monotonicity score (least penalty) from the two directions for rows and columns
-    monotonicity = Math.max(monoTotals[0], monoTotals[1]) + Math.max(monoTotals[2], monoTotals[3]);
+    monotonicity = Math.max(penalties.left, penalties.right) + Math.max(penalties.up, penalties.down);
 
 
     // Corner Bonus: Add a bonus if the max value tile is in a corner
@@ -485,8 +499,8 @@ function calculateHeuristic(grid) {
     return (numEmpty * weightEmpty) +
            (smoothness * weightSmoothness) +
            (monotonicity * weightMonotonicity) +
-           (cornerBonus * weightCornerBonus);
-           // + Math.log2(maxValue) // Optional: Directly reward high tiles
+           (cornerBonus * weightCornerBonus) +
+           (snakePatternScore * weightSnakePattern); // Add weighted snake pattern score
 }
 
 
