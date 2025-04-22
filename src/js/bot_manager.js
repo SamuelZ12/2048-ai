@@ -190,20 +190,40 @@ BotManager.prototype.calculateHeuristic = function(grid) {
 
     var sumOfTiles = 0;
     var numEmpty = 0;
-    var weightEmpty = 1000; // Tunable weight for empty cells
+    var smoothness = 0; // Added smoothness component
+    var weightEmpty = 2.7; // Tunable weight for empty cells (log value often used)
+    var weightSmoothness = 0.1; // Tunable weight for smoothness
 
     grid.eachCell(function (x, y, tile) {
         if (tile) {
             sumOfTiles += tile.value;
+
+            // Smoothness Calculation: Penalize large differences between adjacent tiles
+            // Compare with right neighbor
+            if (x + 1 < grid.size) {
+                var rightNeighbor = grid.cellContent({ x: x + 1, y: y });
+                if (rightNeighbor) {
+                    smoothness -= Math.abs(Math.log2(tile.value) - Math.log2(rightNeighbor.value));
+                }
+            }
+            // Compare with bottom neighbor
+            if (y + 1 < grid.size) {
+                var bottomNeighbor = grid.cellContent({ x: x, y: y + 1 });
+                if (bottomNeighbor) {
+                    smoothness -= Math.abs(Math.log2(tile.value) - Math.log2(bottomNeighbor.value));
+                }
+            }
         } else {
             numEmpty++;
         }
     });
 
-    // Simple heuristic: Sum of tiles + weighted number of empty cells.
-    var heuristicValue = sumOfTiles + numEmpty * weightEmpty;
+    // Heuristic combining factors: Tile Sum, Empty Cells, and Smoothness
+    // Using Math.log(numEmpty + 1) can provide a diminishing return for empty cells
+    var heuristicValue = sumOfTiles + Math.log(numEmpty + 1) * weightEmpty + smoothness * weightSmoothness;
 
-    // TODO: Optionally add other components like smoothness, monotonicity, corner bonus here.
+
+    // TODO: Optionally add other components like monotonicity, corner bonus here.
 
     return heuristicValue; 
 };
