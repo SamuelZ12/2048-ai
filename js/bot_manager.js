@@ -2,7 +2,7 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 4;
+    this.depth = 3;
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
@@ -241,8 +241,8 @@ BotManager.prototype.simulateMove = function(grid, direction) {
 
             if (tile) {
                 var positions = selfGameManager.findFarthestPosition.call(
-                    {grid: gridCopy, size: gridCopy.size, isCellAvailable: gridCopy.isCellAvailable.bind(gridCopy), withinBounds: gridCopy.withinBounds.bind(gridCopy)}, 
-                    cell, 
+                    { grid: gridCopy },
+                    cell,
                     vector
                 );
                 var next = gridCopy.cellContent(positions.next);
@@ -262,7 +262,9 @@ BotManager.prototype.simulateMove = function(grid, direction) {
                     tile.updatePosition(positions.farthest);
                 }
 
-                if (!selfGameManager.positionsEqual(cell, tile.getPosition())) {
+                // Check if the tile moved from its original spot
+                // Pass the tile object directly, as positionsEqual expects {x, y} properties
+                if (!selfGameManager.positionsEqual(cell, tile)) { 
                     moved = true;
                 }
             }
@@ -287,8 +289,8 @@ BotManager.prototype.canMoveOnGrid = function(grid, direction) {
 
             if (tile) {
                 var positions = selfGameManager.findFarthestPosition.call(
-                    {grid: gridCopy, size: gridCopy.size, isCellAvailable: gridCopy.isCellAvailable.bind(gridCopy)}, 
-                    cell, 
+                    { grid: gridCopy },
+                    cell,
                     vector
                 );
                 var next = gridCopy.cellContent(positions.next);
@@ -309,19 +311,11 @@ BotManager.prototype.canMove = function(direction) {
     return this.canMoveOnGrid(this.gameManager.grid, direction);
 };
 
+// Corrected copyGrid function in js/bot_manager.js
 BotManager.prototype.copyGrid = function(grid) {
-    var gridCopy = new Grid(grid.size);
-    for (var x = 0; x < grid.size; x++) {
-        for (var y = 0; y < grid.size; y++) {
-            if (grid.cells[x][y]) {
-                gridCopy.cells[x][y] = new Tile(
-                    {x: x, y: y},
-                    grid.cells[x][y].value
-                );
-            }
-        }
-    }
-    return gridCopy;
+    var serialized = grid.serialize();
+    // Create a new Grid instance using the serialized state's size and cells
+    return new Grid(serialized.size, serialized.cells);
 };
 
 BotManager.prototype.updateHighScoreDisplay = function() {
