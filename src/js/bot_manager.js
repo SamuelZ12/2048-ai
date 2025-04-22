@@ -2,14 +2,15 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 3; // This will now act as the max depth for IDDFS
-    this.timeLimitPerMove = 100; // Default time limit in milliseconds
+    this.depth = parseInt(localStorage.getItem('maxDepthSetting') || 3, 10); // Load saved depth or default to 3
+    this.timeLimitPerMove = 33; // Default time limit in milliseconds
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
     this.updateHighScoreDisplay();
     this.addControls();
     this.addSpeedControls();
+    this.addDepthControls(); // Add call for depth controls
 
     // Worker related properties
     this.worker = null;
@@ -156,6 +157,30 @@ BotManager.prototype.addSpeedControls = function() {
         self.moveSpeed = self.fpsToMs(fps);
         speedValue.textContent = fps + ' FPS';
         localStorage.setItem('moveSpeed', fps);
+    });
+};
+
+BotManager.prototype.addDepthControls = function() {
+    var self = this;
+    var depthSlider = document.querySelector('.depth-slider');
+    var depthValueDisplay = document.querySelector('.depth-value');
+
+    if (!depthSlider || !depthValueDisplay) {
+        console.error("Depth control elements not found!");
+        return;
+    }
+
+    // Set initial values from the loaded/default setting
+    depthSlider.value = this.depth;
+    depthValueDisplay.textContent = this.depth;
+
+    // Add event listener for slider changes
+    depthSlider.addEventListener('input', function(e) {
+        var newDepth = parseInt(e.target.value, 10);
+        self.depth = newDepth; // Update the BotManager's depth setting
+        depthValueDisplay.textContent = newDepth; // Update the UI display
+        localStorage.setItem('maxDepthSetting', newDepth); // Save setting to localStorage
+        console.log("Max Depth setting changed to:", self.depth); // Optional log
     });
 };
 

@@ -638,3 +638,64 @@ hr {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+
+.speed-controls, .depth-controls {
+  margin-top: 20px;
+  h4 {
+    color: $bright-text-color;
+    margin: 0 0 10px 0;
+    text-align: center;
+    font-size: 16px;
+  }
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+// Generalize slider styles
+input[type=range] {
+  flex-grow: 1;
+  -webkit-appearance: none; // Override default look
+  appearance: none;
+  width: 100%; // Ensure it takes full width within container
+  height: 8px; // Track height
+  background: darken($game-container-background, 10%); // Track color
+  border-radius: 5px;
+  cursor: pointer;
+
+  // Thumb styles (Chrome/Safari/Edge)
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: $bright-text-color; // Thumb color
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  // Thumb styles (Firefox)
+  &::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: $bright-text-color; // Thumb color
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+}
+
+.speed-value {
+  color: $bright-text-color;
+  font-size: 14px;
+  min-width: 45px; // Ensure space for text like "15 FPS"
+  text-align: right;
+}
+
+.ai-scores {
+  margin-top: 20px;
+}
