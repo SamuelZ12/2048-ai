@@ -32,15 +32,12 @@ BotManager.prototype.initializeWorker = function() {
     this.worker.onmessage = function(event) {
         // console.log("BotManager received message from worker:", event.data); // Debug log
         self.isCalculating = false; // Worker finished calculation
-        const botButtonEnable = document.querySelector('.bot-button');
-        if (botButtonEnable) botButtonEnable.disabled = false; // Re-enable button
 
-        // Check if the worker sent back a bestMove property
-        if (typeof event.data.bestMove !== 'undefined') {
+        if (event.data.bestMove !== null && typeof event.data.bestMove !== 'undefined') {
             var bestMove = event.data.bestMove;
 
-            // Ensure the move is valid (0-3) and the bot should still run
-            if (bestMove !== null && bestMove >= 0 && bestMove <= 3 && self.isEnabled && !self.gameManager.isGameTerminated()) {
+            // Only proceed if the bot is still enabled and the game isn't over
+            if (self.isEnabled && !self.gameManager.isGameTerminated()) {
                 console.log("Bot making move:", bestMove);
                 self.gameManager.move(bestMove);
 
@@ -52,19 +49,8 @@ BotManager.prototype.initializeWorker = function() {
                     }
                 }, self.moveSpeed);
             } else {
-                // Handle invalid move (null, -1) or bot disabled/game over
-                if (bestMove === null || bestMove === -1) {
-                     console.warn("Bot worker returned invalid/no move (", bestMove, ") - Game likely over or stuck. Stopping bot.");
-                } else {
-                     console.log("Bot received move (", bestMove, ") but is disabled or game is over. Ignoring.");
-                }
-                self.terminateWorker(); // Stop the bot and clean up worker
-                // Optionally update UI if the bot stops itself due to invalid move
-                 if (self.isEnabled) {
-                     var botButton = document.querySelector('.bot-button');
-                     if (botButton) botButton.classList.remove('active');
-                     self.isEnabled = false;
-                 }
+                console.log("Bot received move but is disabled or game is over. Ignoring.");
+                self.terminateWorker(); // Clean up worker if disabled or game ended
             }
         } else if (event.data.status === 'ready') {
              console.log("Bot Worker reported status: ready");
@@ -92,8 +78,6 @@ BotManager.prototype.initializeWorker = function() {
     this.worker.onerror = function(error) {
         console.error("Error in Bot Worker:", error.message, "at", error.filename, ":", error.lineno);
         self.isCalculating = false;
-        const botButtonError = document.querySelector('.bot-button');
-        if (botButtonError) botButtonError.disabled = false; // Re-enable button on error
         self.terminateWorker(); // Stop the bot on worker error
         // Optionally, update UI to show bot error
         var botButton = document.querySelector('.bot-button');
@@ -135,8 +119,6 @@ BotManager.prototype.addControls = function() {
         } else {
             console.log("AI Bot Disabled");
             self.terminateWorker(); // Terminate worker when disabled
-            // Ensure button is re-enabled if manually disabled
-            if (botButton) botButton.disabled = false;
         }
     });
     
@@ -210,16 +192,9 @@ BotManager.prototype.makeNextMove = function() {
         // We can send an initial task immediately after creating worker
     }
 
-    // Get button reference once for the entire function
-    const botButton = document.querySelector('.bot-button');
-    
     // Check if worker exists and is not already calculating
     if (this.worker && !this.isCalculating) {
         console.log("Requesting next move from worker. Max Depth:", this.depth, "Time Limit:", this.timeLimitPerMove, "ms");
-        
-        // Disable button to prevent rapid toggling during calculation
-        if (botButton) botButton.disabled = true;
-        
         this.isCalculating = true;
         try {
             // Send current grid state, max depth, and time limit to the worker
@@ -234,7 +209,8 @@ BotManager.prototype.makeNextMove = function() {
             this.isCalculating = false;
             this.terminateWorker(); // Stop bot if communication fails
             // Optionally, update UI
-            if (botButton) botButton.classList.remove('active');
+            var botButton = document.querySelector('.bot-button');
+             if (botButton) botButton.classList.remove('active');
             this.isEnabled = false;
         }
     } else if (this.isCalculating) {
