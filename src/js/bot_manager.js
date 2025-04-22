@@ -2,7 +2,7 @@ function BotManager(gameManager) {
     this.gameManager = gameManager;
     this.isEnabled = false;
     this.isRandomEnabled = false;
-    this.depth = 2;
+    this.depth = 3;
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
