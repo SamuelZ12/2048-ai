@@ -33,11 +33,12 @@ BotManager.prototype.initializeWorker = function() {
         // console.log("BotManager received message from worker:", event.data); // Debug log
         self.isCalculating = false; // Worker finished calculation
 
-        if (event.data.bestMove !== null && typeof event.data.bestMove !== 'undefined') {
+        // Check if the worker sent back a bestMove property
+        if (typeof event.data.bestMove !== 'undefined') {
             var bestMove = event.data.bestMove;
 
-            // Only proceed if the bot is still enabled and the game isn't over
-            if (self.isEnabled && !self.gameManager.isGameTerminated()) {
+            // Ensure the move is valid (0-3) and the bot should still run
+            if (bestMove !== null && bestMove >= 0 && bestMove <= 3 && self.isEnabled && !self.gameManager.isGameTerminated()) {
                 console.log("Bot making move:", bestMove);
                 self.gameManager.move(bestMove);
 
@@ -49,8 +50,19 @@ BotManager.prototype.initializeWorker = function() {
                     }
                 }, self.moveSpeed);
             } else {
-                console.log("Bot received move but is disabled or game is over. Ignoring.");
-                self.terminateWorker(); // Clean up worker if disabled or game ended
+                // Handle invalid move (null, -1) or bot disabled/game over
+                if (bestMove === null || bestMove === -1) {
+                     console.warn("Bot worker returned invalid/no move (", bestMove, ") - Game likely over or stuck. Stopping bot.");
+                } else {
+                     console.log("Bot received move (", bestMove, ") but is disabled or game is over. Ignoring.");
+                }
+                self.terminateWorker(); // Stop the bot and clean up worker
+                // Optionally update UI if the bot stops itself due to invalid move
+                 if (self.isEnabled) {
+                     var botButton = document.querySelector('.bot-button');
+                     if (botButton) botButton.classList.remove('active');
+                     self.isEnabled = false;
+                 }
             }
         } else if (event.data.status === 'ready') {
              console.log("Bot Worker reported status: ready");
