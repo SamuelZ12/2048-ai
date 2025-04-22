@@ -32,6 +32,8 @@ BotManager.prototype.initializeWorker = function() {
     this.worker.onmessage = function(event) {
         // console.log("BotManager received message from worker:", event.data); // Debug log
         self.isCalculating = false; // Worker finished calculation
+        const botButtonEnable = document.querySelector('.bot-button');
+        if (botButtonEnable) botButtonEnable.disabled = false; // Re-enable button
 
         // Check if the worker sent back a bestMove property
         if (typeof event.data.bestMove !== 'undefined') {
@@ -90,6 +92,8 @@ BotManager.prototype.initializeWorker = function() {
     this.worker.onerror = function(error) {
         console.error("Error in Bot Worker:", error.message, "at", error.filename, ":", error.lineno);
         self.isCalculating = false;
+        const botButtonError = document.querySelector('.bot-button');
+        if (botButtonError) botButtonError.disabled = false; // Re-enable button on error
         self.terminateWorker(); // Stop the bot on worker error
         // Optionally, update UI to show bot error
         var botButton = document.querySelector('.bot-button');
@@ -131,6 +135,8 @@ BotManager.prototype.addControls = function() {
         } else {
             console.log("AI Bot Disabled");
             self.terminateWorker(); // Terminate worker when disabled
+            // Ensure button is re-enabled if manually disabled
+            if (botButton) botButton.disabled = false;
         }
     });
     
@@ -204,9 +210,16 @@ BotManager.prototype.makeNextMove = function() {
         // We can send an initial task immediately after creating worker
     }
 
+    // Get button reference once for the entire function
+    const botButton = document.querySelector('.bot-button');
+    
     // Check if worker exists and is not already calculating
     if (this.worker && !this.isCalculating) {
         console.log("Requesting next move from worker. Max Depth:", this.depth, "Time Limit:", this.timeLimitPerMove, "ms");
+        
+        // Disable button to prevent rapid toggling during calculation
+        if (botButton) botButton.disabled = true;
+        
         this.isCalculating = true;
         try {
             // Send current grid state, max depth, and time limit to the worker
@@ -221,8 +234,7 @@ BotManager.prototype.makeNextMove = function() {
             this.isCalculating = false;
             this.terminateWorker(); // Stop bot if communication fails
             // Optionally, update UI
-            var botButton = document.querySelector('.bot-button');
-             if (botButton) botButton.classList.remove('active');
+            if (botButton) botButton.classList.remove('active');
             this.isEnabled = false;
         }
     } else if (this.isCalculating) {

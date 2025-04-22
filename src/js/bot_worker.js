@@ -356,6 +356,29 @@ function transpose(board) {
     return board;
 }
 
+// --- TEMPORARY DIAGNOSTIC CHECK ---
+function checkTranspose() {
+    console.log("Checking transpose function integrity...");
+    let failed = false;
+    // Test with a few sample boards (add more complex ones if needed)
+    const testBoards = [0n, 0x1234123412341234n, 0x1111222233334444n, 0xFEDCBA9876543210n];
+    for (const board of testBoards) {
+        const transposedOnce = transpose(board);
+        const transposedTwice = transpose(transposedOnce);
+        if (transposedTwice !== board) {
+            console.error(`Transpose check FAILED! Original: ${board.toString(16)}, T1: ${transposedOnce.toString(16)}, T2: ${transposedTwice.toString(16)}`);
+            failed = true;
+        }
+    }
+     if (!failed) {
+         console.log("Transpose check PASSED basic tests.");
+     } else {
+         console.error("Transpose function seems flawed.");
+     }
+}
+checkTranspose(); // Run the check when the worker loads
+// --- END TEMPORARY DIAGNOSTIC CHECK ---
+
 /**
  * Performs an up move on the bitboard.
  * Achieved by transposing, moving left, and transposing back.
@@ -363,11 +386,17 @@ function transpose(board) {
  * @returns {{board: BigInt, score: BigInt, moved: boolean}}
  */
 function moveUp(board) {
+    const originalBoard = board; // Keep original for logging
+    console.log(`[moveUp] Initial: ${originalBoard.toString(16)}`);
     const transposedBoard = transpose(board);
+    console.log(`[moveUp] Transposed: ${transposedBoard.toString(16)}`);
     const { board: movedTransposedBoard, score, moved: movedLeft } = moveLeft(transposedBoard);
+    console.log(`[moveUp] Moved Transposed: ${movedTransposedBoard.toString(16)} (movedLeft: ${movedLeft})`);
     const newBoard = transpose(movedTransposedBoard);
-    // The move happened if the intermediate moveLeft operation caused a change
-    return { board: newBoard, score: score, moved: movedLeft };
+    console.log(`[moveUp] Final: ${newBoard.toString(16)}`);
+    // Compare final state to original for accurate 'moved' determination
+    const actuallyMoved = newBoard !== originalBoard;
+    return { board: newBoard, score: score, moved: actuallyMoved }; // Return result based on actual state change
 }
 
 /**
@@ -377,11 +406,17 @@ function moveUp(board) {
  * @returns {{board: BigInt, score: BigInt, moved: boolean}}
  */
 function moveDown(board) {
+    const originalBoard = board; // Keep original for logging
+    console.log(`[moveDown] Initial: ${originalBoard.toString(16)}`);
     const transposedBoard = transpose(board);
+    console.log(`[moveDown] Transposed: ${transposedBoard.toString(16)}`);
     const { board: movedTransposedBoard, score, moved: movedRight } = moveRight(transposedBoard);
+    console.log(`[moveDown] Moved Transposed: ${movedTransposedBoard.toString(16)} (movedRight: ${movedRight})`);
     const newBoard = transpose(movedTransposedBoard);
-    // The move happened if the intermediate moveRight operation caused a change
-    return { board: newBoard, score: score, moved: movedRight };
+    console.log(`[moveDown] Final: ${newBoard.toString(16)}`);
+    // Compare final state to original for accurate 'moved' determination
+    const actuallyMoved = newBoard !== originalBoard;
+    return { board: newBoard, score: score, moved: actuallyMoved }; // Return result based on actual state change
 }
 
 // --- AI Logic (Adapted from BotManager) ---
@@ -839,41 +874,28 @@ generateMoveLUTs();
 console.log("Bot Worker: Loaded and ready with Bitboard logic.");
 
 /**
+ * Checks if the game is over based on the bitboard state.
+ * Returns true when there are no empty cells AND no move can change the board.
+ * @param {BigInt} board The current board state as a BigInt.
  * @returns {boolean} True if the game is over, false otherwise.
  */
 function isGameOver(board) {
-    console.log("isGameOver called with board:", board.toString(16)); // Log board value
-    // Check for empty cells first (fast check)
+    // --- Fast path: is there at least one empty cell? ---
     for (let pos = 0; pos < 16; pos++) {
-        const shiftAmount = BigInt(pos * 4);
-        const nybble = (board >> shiftAmount) & NYBBLE_MASK;
-        // console.log(`pos: ${pos}, nybble: ${nybble.toString(16)}`); // Optional detailed log
-        if (nybble === 0n) {
-            console.log("isGameOver: Found empty cell at pos", pos, "-> returning false");
-            return false; // Found an empty cell, game not over
+        const shift = BigInt(pos * 4);
+        if (((board >> shift) & NYBBLE_MASK) === 0n) {
+            return false; // Found empty cell => game continues
         }
     }
-    console.log("isGameOver: No empty cells found. Checking moves...");
 
-    // No empty cells, check if any move is possible
-    if (moveUp(board).moved) {
-        console.log("isGameOver: moveUp possible -> returning false");
-        return false;
-    }
-    if (moveDown(board).moved) {
-        console.log("isGameOver: moveDown possible -> returning false");
-        return false;
-    }
-    if (moveLeft(board).moved) {
-        console.log("isGameOver: moveLeft possible -> returning false");
-        return false;
-    }
-    if (moveRight(board).moved) {
-        console.log("isGameOver: moveRight possible -> returning false");
-        return false;
-    }
+    // --- No empty cells: check if any move changes the board ---
+    // We purposefully compare the resulting board state rather than relying on the
+    // `.moved` flag, in case that flag is computed incorrectly inside the move helpers.
+    if (moveUp(board).board !== board)   return false;
+    if (moveDown(board).board !== board) return false;
+    if (moveLeft(board).board !== board) return false;
+    if (moveRight(board).board !== board) return false;
 
-    // If no empty cells and no move changes the board, game is over
-    console.log("isGameOver: No moves possible -> returning true");
+    // No empty cells and no move leads to a different board -> game over.
     return true;
 } 
