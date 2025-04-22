@@ -1,17 +1,28 @@
-function GameManager(size, InputManager, Actuator, StorageManager) {
+function GameManager(size, inputManagerInstance, actuatorInstance, storageManagerInstance) {
   this.size           = size; // Size of the grid
-  this.inputManager   = new InputManager;
-  this.storageManager = new StorageManager;
-  this.actuator       = new Actuator;
+  this.inputManager   = inputManagerInstance;   // Use the passed instance
+  this.storageManager = storageManagerInstance; // Use the passed instance
+  this.actuator       = actuatorInstance;       // Use the passed instance
+  this.botManager     = null; // Initialize botManager as null
 
   this.startTiles     = 2;
 
+  // Ensure events are bound correctly, assuming inputManagerInstance has the 'on' method
   this.inputManager.on("move", this.move.bind(this));
   this.inputManager.on("restart", this.restart.bind(this));
   this.inputManager.on("keepPlaying", this.keepPlaying.bind(this));
 
   this.setup();
 }
+
+// Add method to set the BotManager instance
+GameManager.prototype.setBotManager = function (botManager) {
+  this.botManager = botManager;
+  // We might need to update the display initially if botManager already loaded scores
+  if (this.botManager) {
+      this.actuate(); // Trigger actuate to update display with potentially loaded scores
+  }
+};
 
 // Restart the game
 GameManager.prototype.restart = function () {
@@ -77,8 +88,40 @@ GameManager.prototype.addRandomTile = function () {
 
 // Sends the updated grid to the actuator
 GameManager.prototype.actuate = function () {
-  if (this.storageManager.getBestScore() < this.score) {
-    this.storageManager.setBestScore(this.score);
+  var bestScoreToDisplay = 0; // Default best score to display
+
+  // Update high score via BotManager if the game is over and a bot mode was active
+  if (this.over && this.botManager) {
+    if (this.botManager.isEnabled) {
+      console.log("Game over for Bot. Updating high score.");
+      this.botManager.updateBotHighScore(this.score);
+      bestScoreToDisplay = this.botManager.botHighScore; // Use bot high score for display
+    } else if (this.botManager.isRandomEnabled) {
+      console.log("Game over for Random. Updating high score.");
+      this.botManager.updateRandomHighScore(this.score);
+       bestScoreToDisplay = this.botManager.randomHighScore; // Use random high score for display
+    } else {
+        // If game is over but no bot was active, maybe update the generic best score?
+        // Or rely on BotManager's display update? Let's keep it simple for now.
+        // Maybe fetch the appropriate score if needed for display below.
+        // bestScoreToDisplay = this.storageManager.getBestScore(); // Example if we kept a general score
+    }
+    // Ensure BotManager's display is also up-to-date (redundant if update methods do it, but safe)
+     if (this.botManager) { // Check if botManager exists before calling its methods
+       this.botManager.updateHighScoreDisplay();
+     }
+  } else if (this.botManager) {
+      // If game is not over, determine which score to display based on active mode
+      if (this.botManager.isEnabled) {
+          bestScoreToDisplay = this.botManager.botHighScore;
+      } else if (this.botManager.isRandomEnabled) {
+          bestScoreToDisplay = this.botManager.randomHighScore;
+      } else {
+          // Maybe display generic best score if manual play score exists?
+          // bestScoreToDisplay = this.storageManager.getBestScore();
+           // Default to 0 if no mode active and no generic score handled
+          bestScoreToDisplay = 0; 
+      }
   }
 
   // Clear the state when the game is over (game over only, not win)
@@ -88,12 +131,14 @@ GameManager.prototype.actuate = function () {
     this.storageManager.setGameState(this.serialize());
   }
 
+  // Pass the relevant data to the actuator
   this.actuator.actuate(this.grid, {
     score:      this.score,
     over:       this.over,
     won:        this.won,
-    bestScore:  this.storageManager.getBestScore(),
+    bestScore:  bestScoreToDisplay, // Pass the determined best score for the main display
     terminated: this.isGameTerminated()
+    // We no longer need to pass botManager state here, as it updates its own UI
   });
 
 };

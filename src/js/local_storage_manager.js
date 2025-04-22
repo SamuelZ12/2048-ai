@@ -20,6 +20,8 @@ window.fakeStorage = {
 
 function LocalStorageManager() {
   this.bestScoreKey     = "bestScore";
+  this.botBestScoreKey  = "botBestScore";
+  this.randomBestScoreKey = "randomBestScore";
   this.gameStateKey     = "gameState";
 
   var supported = this.localStorageSupported();
@@ -41,11 +43,29 @@ LocalStorageManager.prototype.localStorageSupported = function () {
 
 // Best score getters/setters
 LocalStorageManager.prototype.getBestScore = function () {
-  return this.storage.getItem(this.bestScoreKey) || 0;
+  return parseInt(this.storage.getItem(this.bestScoreKey) || 0, 10);
 };
 
 LocalStorageManager.prototype.setBestScore = function (score) {
   this.storage.setItem(this.bestScoreKey, score);
+};
+
+// Bot best score getters/setters
+LocalStorageManager.prototype.getBotBestScore = function () {
+  return parseInt(this.storage.getItem(this.botBestScoreKey) || 0, 10);
+};
+
+LocalStorageManager.prototype.setBotBestScore = function (score) {
+  this.storage.setItem(this.botBestScoreKey, score);
+};
+
+// Random best score getters/setters
+LocalStorageManager.prototype.getRandomBestScore = function () {
+  return parseInt(this.storage.getItem(this.randomBestScoreKey) || 0, 10);
+};
+
+LocalStorageManager.prototype.setRandomBestScore = function (score) {
+  this.storage.setItem(this.randomBestScoreKey, score);
 };
 
 // Game state getters/setters and clearing
