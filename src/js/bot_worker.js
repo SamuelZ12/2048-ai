@@ -305,16 +305,56 @@ function tileMatchesAvailable(grid) {
 }
 
 // Checks if a specific move is possible from the given grid state
+// Optimized version: Avoids full simulation
 function canMoveOnGrid(grid, direction) {
-    // Optimize: Check if the simulated move actually changes the grid state.
-    var simulation = simulateMove(grid, direction);
-    return simulation.moved;
+    var vector = getVector(direction);
+    var size = grid.size;
+
+    for (var x = 0; x < size; x++) {
+        for (var y = 0; y < size; y++) {
+            var cell = { x: x, y: y };
+            var tile = grid.cellContent(cell);
+
+            if (tile) {
+                // Check the cell right next to the tile in the move direction
+                var nextCell = { x: cell.x + vector.x, y: cell.y + vector.y };
+
+                // Ensure the next cell is within bounds
+                if (grid.withinBounds(nextCell)) {
+                    var nextTile = grid.cellContent(nextCell);
+
+                    // Move is possible if the next cell is empty
+                    if (!nextTile) {
+                        return true; // Tile can slide into an empty space
+                    }
+
+                    // Move is possible if the next cell has a tile of the same value (can merge)
+                    if (nextTile.value === tile.value) {
+                        return true; // Tiles can merge
+                    }
+                }
+                // If nextCell is out of bounds, the tile is at the edge and cannot move further
+                // in this direction unless merging (which is handled above).
+            }
+            // If the current cell is empty, it doesn't contribute to a move possibility directly,
+            // but an adjacent tile might move into it (handled when iterating over that adjacent tile).
+        }
+    }
+
+    // If we iterated through all cells and found no possible slide or merge
+    return false;
 }
 
 // Checks if the game is over (no possible moves)
 function checkGameOver(grid) {
-    // Game is over if no moves are available
-    return !movesAvailable(grid);
+    // Game is over if no moves are available in any direction
+    for (let direction = 0; direction < 4; direction++) {
+        if (canMoveOnGrid(grid, direction)) {
+            return false; // Found a possible move
+        }
+    }
+    // If no move is possible in any direction
+    return true;
 }
 
 
@@ -450,12 +490,41 @@ function calculateHeuristic(grid) {
 }
 
 
-// Evaluates the expected score of a grid state after a random tile is placed
-function evaluateChanceNode(grid, depth) {
-    var emptyCells = grid.availableCells();
-    var numEmpty = emptyCells.length;
+// --- Transposition Table Key Generation ---
+function getGridKey(grid) {
+    let key = '';
+    for (let x = 0; x < grid.size; x++) {
+        for (let y = 0; y < grid.size; y++) {
+            let tile = grid.cellContent({ x: x, y: y });
+            key += (tile ? tile.value : 0) + '-'; // Use '-' as separator
+        }
+    }
+    return key;
+}
 
-    if (numEmpty === 0) {
+
+// --- Expectimax Search Algorithm ---
+
+var transpositionTable; // Defined in findBestMove
+
+// Represents the 'chance' node in the expectimax tree (after player move)
+// Calculates the expected score after a random tile is added.
+function evaluateChanceNode(grid, depth) {
+    // Transposition Table Check
+    const gridKey = getGridKey(grid);
+    if (transpositionTable.has(gridKey)) {
+        const entry = transpositionTable.get(gridKey);
+        // Use stored value only if it was computed at least as deep as required now
+        if (entry.depth >= depth && typeof entry.score !== 'undefined') {
+             // console.log(`TT Hit (Chance): Key=${gridKey.substring(0,10)}..., Depth=${depth}, Stored Score=${entry.score}`);
+             return entry.score;
+        }
+    }
+
+    let availableCells = grid.availableCells();
+    let numAvailable = availableCells.length;
+
+    if (numAvailable === 0) {
         return calculateHeuristic(grid); // No place for tiles, return current state heuristic
     }
 
@@ -469,8 +538,8 @@ function evaluateChanceNode(grid, depth) {
 
     // Consider placing a '2' tile in each empty cell
     var scoreSum2 = 0;
-    for (var i = 0; i < numEmpty; i++) {
-        var cell = emptyCells[i];
+    for (var i = 0; i < numAvailable; i++) {
+        var cell = availableCells[i];
         var gridWith2 = copyGrid(grid);
         gridWith2.insertTile(new Tile(cell, 2));
         // If inserting the tile makes the game over, use heuristic, otherwise recurse
@@ -484,8 +553,8 @@ function evaluateChanceNode(grid, depth) {
 
     // Consider placing a '4' tile in each empty cell
     var scoreSum4 = 0;
-    for (var i = 0; i < numEmpty; i++) {
-        var cell = emptyCells[i];
+    for (var i = 0; i < numAvailable; i++) {
+        var cell = availableCells[i];
         var gridWith4 = copyGrid(grid); // Need a fresh copy
         gridWith4.insertTile(new Tile(cell, 4));
          // If inserting the tile makes the game over, use heuristic, otherwise recurse
@@ -499,19 +568,37 @@ function evaluateChanceNode(grid, depth) {
 
 
     // Calculate the weighted average score over all possible placements
-    totalExpectedScore = (0.9 * (scoreSum2 / numEmpty)) + (0.1 * (scoreSum4 / numEmpty));
+    totalExpectedScore = (0.9 * (scoreSum2 / numAvailable)) + (0.1 * (scoreSum4 / numAvailable));
+
+    // Store in transposition table
+    transpositionTable.set(gridKey, { score: totalExpectedScore, depth: depth });
 
     return totalExpectedScore;
 }
 
+// Represents the 'max' node in the expectimax tree (player's turn)
+// Chooses the move that maximizes the expected score from the subsequent chance node.
 function expectimaxSearch(grid, depth) {
-    // Base case: depth limit reached or game over
-    if (depth === 0 || checkGameOver(grid)) {
-        return { move: null, score: calculateHeuristic(grid) };
+    // Base case: Leaf node (max depth or game over)
+    if (depth <= 0 || checkGameOver(grid)) {
+        return { move: -1, score: calculateHeuristic(grid) }; // Return heuristic score at leaf
     }
 
-    var bestScore = -Infinity;
-    var bestMove = null;
+     // Transposition Table Check for Player Node
+     const gridKey = getGridKey(grid);
+     if (transpositionTable.has(gridKey)) {
+         const entry = transpositionTable.get(gridKey);
+         // Use stored value only if it was computed at least as deep as required now
+         // AND if it stores a move (indicating it came from a player node evaluation)
+         if (entry.depth >= depth && typeof entry.move !== 'undefined') {
+             // console.log(`TT Hit (Max): Key=${gridKey.substring(0,10)}..., Depth=${depth}, Stored Move=${entry.move}, Score=${entry.score}`);
+             return entry;
+         }
+     }
+
+
+    let bestScore = -Infinity;
+    let bestMove = -1; // 0: up, 1: right, 2: down, 3: left
 
     // Max Node: Iterate through possible moves (0: up, 1: right, 2: down, 3: left)
     for (var direction = 0; direction < 4; direction++) {
@@ -530,7 +617,7 @@ function expectimaxSearch(grid, depth) {
             // Handle -Infinity case from evaluateChanceNode (if placing a tile leads to immediate game over)
             if (currentMoveScore === -Infinity && bestScore === -Infinity) {
                  // If this is the first valid move and it leads to game over, take it
-                 if (bestMove === null) {
+                 if (bestMove === -1) {
                      bestScore = currentMoveScore;
                      bestMove = direction;
                  }
@@ -543,15 +630,24 @@ function expectimaxSearch(grid, depth) {
     }
 
     // If no moves resulted in a changed grid state (game should be over)
-    if (bestMove === null) {
-        return { move: null, score: calculateHeuristic(grid) };
+    if (bestMove === -1) {
+        return { move: -1, score: calculateHeuristic(grid) };
     }
+
+    // Store in transposition table
+    transpositionTable.set(gridKey, { move: bestMove, score: bestScore, depth: depth });
 
     return { move: bestMove, score: bestScore };
 }
 
-// Main entry point for the worker calculation
+
+// --- Main Function Called by BotManager ---
 function findBestMove(gridState, depth) {
+    console.log("Worker received task. Depth:", depth); // Log depth received
+    transpositionTable = new Map(); // Clear/Initialize TT for each new top-level call
+    const startTime = performance.now();
+
+    // Reconstruct the Grid object from the serialized state
     var grid = new Grid(gridState.size, gridState.cells);
     return expectimaxSearch(grid, depth);
 }
