@@ -376,7 +376,7 @@ function calculateHeuristic(grid) {
 
     // Weights for different components (can be tuned)
     var weightEmpty = 1.5; // Prioritize empty cells
-    var weightSmoothness = 0.1; // Penalize differences between adjacent tiles
+    var weightSmoothness = 0.5; // Penalize differences between adjacent tiles
     var weightMonotonicity = 1.0; // Encourage tiles values to increase/decrease along rows/cols
     var weightCornerBonus = 2.0; // Encourage the max value tile to be in a corner
     var weightSnakePattern = 3.0; // Encourage tiles to follow a snake pattern

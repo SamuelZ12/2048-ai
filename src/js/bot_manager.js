@@ -3,7 +3,7 @@ function BotManager(gameManager) {
     this.isEnabled = false;
     this.isRandomEnabled = false;
     this.depth = parseInt(localStorage.getItem('maxDepthSetting') || 3, 10); // Load saved depth or default to 3
-    this.timeLimitPerMove = 33; // Default time limit in milliseconds
+    this.timeLimitPerMove = 150; // Default time limit in milliseconds
     this.moveSpeed = this.fpsToMs(localStorage.getItem('moveSpeed') || 15);
     this.botHighScore = localStorage.getItem('botHighScore') || 0;
     this.randomHighScore = localStorage.getItem('randomHighScore') || 0;
