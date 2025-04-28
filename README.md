@@ -1,6 +1,6 @@
 # 2048 AI
 
-A web-based version of the classic 2048 game featuring both manual play and an AI player powered by the Expectimax algorithm with Iterative Deepening. 
+A web-based version of the classic 2048 game featuring both manual play and an AI agent that plays using the expectimax search algorithm with iterative deepening. 
 
 ## Table of Contents
 
